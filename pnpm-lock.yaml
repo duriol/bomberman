@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       phaser:
-        specifier: ^3.60.0
-        version: 3.90.0
+        specifier: 3.60.0
+        version: 3.60.0
       socket.io-client:
         specifier: ^4.7.5
         version: 4.8.3
@@ -391,8 +391,8 @@ packages:
     resolution: {integrity: sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==}
     engines: {node: '>=0.10.0'}
 
-  phaser@3.90.0:
-    resolution: {integrity: sha512-/cziz/5ZIn02uDkC9RzN8VF9x3Gs3XdFFf9nkiMEQT3p7hQlWuyjy4QWosU802qqno2YSLn2BfqwOKLv/sSVfQ==}
+  phaser@3.60.0:
+    resolution: {integrity: sha512-IKUy35EnoEVcl2EmJ8WOyK4X8OoxHYdlhZLgRGpNrvD1fEagYffhVmwHcapE/tGiLgyrnezmXIo5RrH2NcrTHw==}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -735,7 +735,7 @@ snapshots:
 
   object-assign@4.1.1: {}
 
-  phaser@3.90.0:
+  phaser@3.60.0:
     dependencies:
       eventemitter3: 5.0.4
 
