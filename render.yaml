@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: bomberman-server
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node index.js
+    plan: free
+    envVars:
+      - key: PORT
+        value: 10000   # Render assigns PORT automatically; this is just a fallback
+    healthCheckPath: /health

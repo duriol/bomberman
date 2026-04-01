@@ -1,0 +1,13 @@
+{
+  "name": "bomberman-server",
+  "version": "1.0.0",
+  "description": "Relay server for Bomberman online multiplayer",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "socket.io": "^4.7.5"
+  }
+}

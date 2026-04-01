@@ -1,0 +1,67 @@
+# Deploy Bomberman frontend to GitHub Pages
+# Repo: https://github.com/duriol/bomberman
+# Triggered on every push to main (or manually)
+#
+# ⚠️  The relay server (Socket.IO) runs on Render (render.yaml).
+#     Once deployed, copy its public URL and add it as a GitHub secret:
+#       Name:  SERVER_URL
+#       Value: https://bomberman-server.onrender.com
+#     Without it the lobby falls back to localhost:3030 (local dev only).
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Derive the base path from the repo name: /bomberman/
+      - name: Build frontend
+        run: pnpm build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/
+          # Optional: bake the server URL into the build so players don't have
+          # to type it in the lobby. Remove if you prefer runtime input.
+          VITE_SERVER_URL: ${{ secrets.SERVER_URL }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

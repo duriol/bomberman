@@ -1,0 +1,311 @@
+import {
+  TILE_SIZE, TILE, DEFAULT_PLAYER_STATS, PLAYER_COLORS,
+  SPAWN_POSITIONS, RESPAWN_DELAY,
+} from '../data/constants.js';
+import { pixelToTile, tileToPixel, isWalkable } from '../utils/MapGenerator.js';
+import { audioManager } from '../systems/AudioManager.js';
+
+export class Player {
+  /**
+   * @param {Phaser.Scene} scene
+   * @param {number}       index - 0-based player index
+   * @param {object[][]}   map   - tile map reference
+   * @param {object}       bombManager
+   */
+  constructor(scene, index, map, bombManager) {
+    this.scene      = scene;
+    this.index      = index;
+    this.map        = map;
+    this.bombManager = bombManager;
+
+    const spawn = SPAWN_POSITIONS[index];
+    const pos   = tileToPixel(spawn.col, spawn.row, TILE_SIZE);
+
+    // Stats (cloned)
+    this.stats = { ...DEFAULT_PLAYER_STATS };
+    this.activeBombs  = 0;
+    this.pendingRemote = [];  // bombs waiting for remote detonation
+    this._passableBombs = new Set(); // bomb tiles this player can still walk through
+    this.alive   = true;
+    this.stunned = false;  // skull curse flag
+    this.curseTimer = 0;
+    this.lives   = this.stats.lives;
+    this.onEvent = null;  // optional callback for online host event buffering
+
+    // Create sprite
+    this.sprite = scene.physics.add.sprite(pos.x, pos.y, `player_${index}_idle`);
+    this.sprite.setCollideWorldBounds(true);
+    this.sprite.setDepth(10);
+    this.sprite.setData('playerIndex', index);
+
+    // Create player number text label
+    this.label = scene.add.text(pos.x, pos.y - TILE_SIZE / 2 - 4,
+      `P${index + 1}`, {
+        fontSize: '11px',
+        color: '#ffffff',
+        stroke: '#000000',
+        strokeThickness: 3,
+        fontFamily: 'monospace',
+      }).setOrigin(0.5, 1).setDepth(20);
+
+    // Animations
+    this._createAnims();
+
+    // Movement
+    this._dx = 0;
+    this._dy = 0;
+    this._facing = 'down';
+    this._walkTimer = 0;
+    this._walkFrame = 0;
+  }
+
+  _createAnims() {
+    const key = `player_${this.index}`;
+    if (!this.scene.anims.exists(`${key}_walk`)) {
+      this.scene.anims.create({
+        key: `${key}_walk`,
+        frames: [
+          { key: `player_${this.index}_walk`, frame: 0 },
+          { key: `player_${this.index}_walk`, frame: 1 },
+          { key: `player_${this.index}_walk`, frame: 2 },
+          { key: `player_${this.index}_walk`, frame: 3 },
+        ],
+        frameRate: 8,
+        repeat: -1,
+      });
+    }
+  }
+
+  get x() { return this.sprite.x; }
+  get y() { return this.sprite.y; }
+
+  get tilePos() {
+    return pixelToTile(this.sprite.x, this.sprite.y, TILE_SIZE);
+  }
+
+  /**
+   * Called each frame by GameScene. input is the result of InputManager.getState(index).
+   */
+  update(delta, input) {
+    if (!this.alive || !this.sprite.active) return;
+
+    // Skull curse tick
+    if (this.stunned) {
+      this.curseTimer -= delta;
+      if (this.curseTimer <= 0) this._clearCurse();
+    }
+
+    if (!input) return;
+
+    // Remote detonation
+    if (input.actionJust && this.stats.remote && this.pendingRemote.length > 0) {
+      const bomb = this.pendingRemote.shift();
+      if (bomb && !bomb.exploded) {
+        bomb.detonate();
+      }
+    }
+
+    // Place bomb
+    if (input.bombJust) {
+      this._tryPlaceBomb();
+    }
+
+    // Movement
+    this._handleMovement(delta, input);
+
+    // Update label position
+    this.label.setPosition(this.sprite.x, this.sprite.y - TILE_SIZE / 2 - 4);
+  }
+
+  _handleMovement(delta, input) {
+    const speed = this.stunned ? this.stats.speed * 2 : this.stats.speed;
+    let vx = 0, vy = 0;
+
+    if (this.stunned) {
+      // Random direction during stun
+      if (this._stunFlipTimer === undefined) this._stunFlipTimer = 0;
+      this._stunFlipTimer -= delta;
+      if (this._stunFlipTimer <= 0) {
+        this._stunDir = Phaser.Math.Between(0, 3);
+        this._stunFlipTimer = Phaser.Math.Between(200, 500);
+      }
+      const dirs = [{ vx: 0, vy: -1 }, { vx: 0, vy: 1 }, { vx: -1, vy: 0 }, { vx: 1, vy: 0 }];
+      const d = dirs[this._stunDir] || dirs[0];
+      vx = d.vx;
+      vy = d.vy;
+    } else {
+      if (input.up)    vy = -1;
+      if (input.down)  vy =  1;
+      if (input.left)  vx = -1;
+      if (input.right) vx =  1;
+
+      // Normalize diagonal
+      if (vx !== 0 && vy !== 0) { vx *= 0.707; vy *= 0.707; }
+    }
+
+    const newX = this.sprite.x + vx * speed * (delta / 1000);
+    const newY = this.sprite.y + vy * speed * (delta / 1000);
+
+    const half = TILE_SIZE / 2 - 4;  // player half-width with slight inset for smooth movement
+
+    const canMoveX = this._canMove(newX, this.sprite.y, half);
+    const canMoveY = this._canMove(this.sprite.x, newY, half);
+
+    this.sprite.x = canMoveX ? newX : this.sprite.x;
+    this.sprite.y = canMoveY ? newY : this.sprite.y;
+
+    // Remove bombs from passable set once the player's hitbox no longer overlaps them
+    for (const key of this._passableBombs) {
+      const [bc, br] = key.split(',').map(Number);
+      if (!this._overlapsRect(this.sprite.x, this.sprite.y, half, bc, br)) {
+        this._passableBombs.delete(key);
+      }
+    }
+
+    const moving = (canMoveX && vx !== 0) || (canMoveY && vy !== 0);
+
+    if (moving) {
+      this._walkTimer += delta;
+      if (this._walkTimer > 120) {
+        this._walkTimer = 0;
+        this._walkFrame = (this._walkFrame + 1) % 4;
+      }
+      this.sprite.setTexture(`player_${this.index}_walk_${this._walkFrame}`);
+    } else {
+      this._walkFrame = 0;
+      this.sprite.setTexture(`player_${this.index}_idle`);
+    }
+  }
+
+  /**
+   * Check if player bounding box at (x, y) overlaps any non-walkable tile,
+   * excluding tiles that have the player's own active bombs.
+   */
+  _canMove(x, y, half) {
+    const corners = [
+      { cx: x - half, cy: y - half },
+      { cx: x + half, cy: y - half },
+      { cx: x - half, cy: y + half },
+      { cx: x + half, cy: y + half },
+    ];
+    for (const { cx, cy } of corners) {
+      const { col, row } = pixelToTile(cx, cy, TILE_SIZE);
+      if (!isWalkable(this.map, col, row)) return false;
+      // Bomb blocks movement unless this player is still in the process of leaving it
+      if (this.bombManager.hasBombAt(col, row)) {
+        if (!this._passableBombs.has(`${col},${row}`)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  /** Returns true if player hitbox at (px, py) overlaps tile (col, row) at all */
+  _overlapsRect(px, py, half, col, row) {
+    const tileLeft  = col * TILE_SIZE;
+    const tileRight = tileLeft + TILE_SIZE;
+    const tileTop   = row  * TILE_SIZE;
+    const tileBot   = tileTop + TILE_SIZE;
+    return px + half > tileLeft && px - half < tileRight &&
+           py + half > tileTop  && py - half < tileBot;
+  }
+
+  _tryPlaceBomb() {
+    if (this.activeBombs >= this.stats.maxBombs) return;
+    const { col, row } = this.tilePos;
+    if (this.bombManager.hasBombAt(col, row)) return;
+
+    const bomb = this.bombManager.placeBomb(col, row, this);
+    if (bomb) {
+      this.activeBombs++;
+      // Mark this tile as passable so the player can walk away from the bomb
+      this._passableBombs.add(`${col},${row}`);
+      audioManager.playPlaceBomb();
+      if (this.stats.remote) {
+        this.pendingRemote.push(bomb);
+      }
+    }
+  }
+
+  onBombExploded(col, row) {
+    this.activeBombs = Math.max(0, this.activeBombs - 1);
+    this._passableBombs.delete(`${col},${row}`);
+    // Remove from pending remote if present
+    this.pendingRemote = this.pendingRemote.filter(b => !b.exploded);
+  }
+
+  /** Apply an item to this player */
+  applyItem(type) {
+    audioManager.playItemPickup();
+    switch (type) {
+      case 'bomb_up':  this.stats.maxBombs  = Math.min(8, this.stats.maxBombs + 1); break;
+      case 'fire_up':  this.stats.bombRange = Math.min(8, this.stats.bombRange + 1); break;
+      case 'speed_up': this.stats.speed     = Math.min(280, this.stats.speed + 20);  break;
+      case 'remote':   this.stats.remote    = true;  break;
+      case 'pierce':   this.stats.pierce    = true;  break;
+      case 'kick':     this.stats.kick      = true;  break;
+      case 'skull':    this._applyCurse();           break;
+    }
+    if (this.onEvent) this.onEvent({ t: 'pickup', pi: this.index, it: type });
+  }
+
+  _applyCurse() {
+    audioManager.playSkull();
+    this.stunned = true;
+    this.curseTimer = 10000;  // 10 seconds
+    this._stunFlipTimer = 0;
+    this._stunDir = 0;
+    // Visual feedback — flash sprite red
+    this.sprite.setTint(0xff0000);
+  }
+
+  _clearCurse() {
+    this.stunned = false;
+    this.sprite.clearTint();
+  }
+
+  /** Called when this player gets hit by an explosion */
+  die() {
+    if (!this.alive) return;
+    audioManager.playPlayerDeath();
+    this.alive = false;
+    this.sprite.setTexture(`player_${this.index}_dead`);
+    this.sprite.setAlpha(0.6);
+    this.sprite.setDepth(1);
+    this.label.setAlpha(0.3);
+    this.lives--;
+    if (this.onEvent) this.onEvent({ t: 'death', pi: this.index });
+  }
+
+  /** Respawn at original position */
+  respawn() {
+    if (this.lives <= 0) return;
+    const spawn = SPAWN_POSITIONS[this.index];
+    const pos = tileToPixel(spawn.col, spawn.row, TILE_SIZE);
+    this.sprite.setPosition(pos.x, pos.y);
+    this.sprite.setTexture(`player_${this.index}_idle`);
+    this.sprite.setAlpha(1);
+    this.sprite.setDepth(10);
+    this.sprite.clearTint();
+    this.label.setAlpha(1);
+    this.alive  = true;
+    this.stunned = false;
+    this.activeBombs = 0;
+    this.pendingRemote = [];
+    if (this.onEvent) this.onEvent({ t: 'respawn', pi: this.index, x: pos.x, y: pos.y });
+    // Brief invincibility flash
+    this.scene.tweens.add({
+      targets: this.sprite,
+      alpha:   { from: 0.3, to: 1 },
+      duration: 200,
+      repeat:   6,
+      yoyo:     true,
+    });
+  }
+
+  destroy() {
+    this.sprite.destroy();
+    this.label.destroy();
+  }
+}

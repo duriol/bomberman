@@ -1,0 +1,20 @@
+{
+  "name": "bomberman",
+  "version": "1.0.0",
+  "description": "Bomberman-style multiplayer game (up to 5 players) built with Phaser 3",
+  "packageManager": "pnpm@10.30.3",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server:start": "pnpm --filter bomberman-server start",
+    "server:dev": "pnpm --filter bomberman-server dev"
+  },
+  "dependencies": {
+    "phaser": "^3.60.0",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}
