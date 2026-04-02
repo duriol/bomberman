@@ -158,6 +158,9 @@ export class Player {
 
   _handleMovement(delta, input) {
     const speed = this.stunned ? this.stats.speed * 2 : this.stats.speed;
+    // Circular hitbox — radius = 3/8 of a tile (18 px for T=48)
+    const R    = Math.round(TILE_SIZE * 3 / 8);
+    const step = speed * (delta / 1000);
     let vx = 0, vy = 0;
 
     if (this.stunned) {
@@ -186,26 +189,24 @@ export class Player {
       if (vx !== 0 && vy !== 0) { vx *= 0.707; vy *= 0.707; }
     }
 
-    const newX = this.sprite.x + vx * speed * (delta / 1000);
-    const newY = this.sprite.y + vy * speed * (delta / 1000);
+    const newX = this.sprite.x + vx * step;
+    const newY = this.sprite.y + vy * step;
 
-    const half = TILE_SIZE / 2 - 4;  // player half-width with slight inset for smooth movement
+    // Test each axis independently so the player slides along walls naturally
+    const canX = this._canMoveCircle(newX, this.sprite.y, R);
+    const canY = this._canMoveCircle(this.sprite.x, newY, R);
 
-    let finalX = this.sprite.x;
-    let finalY = this.sprite.y;
+    let finalX = canX ? newX : this.sprite.x;
+    let finalY = canY ? newY : this.sprite.y;
 
-    if (this._canMove(newX, this.sprite.y, half)) {
-      finalX = newX;
-    } else if (vx !== 0) {
-      // Corner correction on X: if blocked horizontally, nudge Y to slide past corners
-      finalY = this._cornerCorrect(newX, this.sprite.y, half, false);
+    // Corridor entry assist: when moving cardinally and one axis is blocked,
+    // smoothly glide toward the nearest tile center on the free axis so the
+    // player slips into corridors without needing pixel-perfect alignment.
+    if (!canX && vx !== 0 && vy === 0) {
+      finalY = this._snapToCenter(this.sprite.y, TILE_SIZE, step);
     }
-
-    if (this._canMove(this.sprite.x, newY, half)) {
-      finalY = newY;
-    } else if (vy !== 0) {
-      // Corner correction on Y: if blocked vertically, nudge X to slide past corners
-      finalX = this._cornerCorrect(this.sprite.x, newY, half, true);
+    if (!canY && vy !== 0 && vx === 0) {
+      finalX = this._snapToCenter(this.sprite.x, TILE_SIZE, step);
     }
 
     const prevX = this.sprite.x;
@@ -218,10 +219,10 @@ export class Player {
     this._lastMoveVx = (finalX !== prevX) ? vx : 0;
     this._lastMoveVy = (finalY !== prevY) ? vy : 0;
 
-    // Remove bombs from passable set once the player's hitbox no longer overlaps them
+    // Remove bombs from passable set once the circle no longer overlaps them
     for (const key of this._passableBombs) {
       const [bc, br] = key.split(',').map(Number);
-      if (!this._overlapsRect(this.sprite.x, this.sprite.y, half, bc, br)) {
+      if (!this._overlapsCircle(this.sprite.x, this.sprite.y, R, bc, br)) {
         this._passableBombs.delete(key);
       }
     }
@@ -242,71 +243,49 @@ export class Player {
   }
 
   /**
-   * Corner correction: when movement in direction `axis` is blocked,
-   * check if a small perpendicular nudge would let the player slide past
-   * the corner of a tile. Returns the corrected perpendicular coordinate if
-   * a nudge is possible, otherwise returns the original value unchanged.
-   *
-   * @param {number}  x        proposed x position
-   * @param {number}  y        proposed y position
-   * @param {number}  half     hitbox half-size
-   * @param {boolean} nudgeX   true → nudge X (blocked vertically), false → nudge Y
-   * @returns {number} corrected x or y
+   * Circular hitbox vs tile-grid collision.
+   * Tests a circle of radius r centered at (x, y) against all solid tiles
+   * using the closest-point-on-AABB method.
    */
-  _cornerCorrect(x, y, half, nudgeX) {
-    // Maximum nudge distance — just under half a tile so we never skip over walls
-    const MAX_NUDGE = TILE_SIZE * 0.45;
-    const STEP      = 1;
-
-    if (nudgeX) {
-      // Blocked moving vertically; try nudging X left or right
-      for (let d = STEP; d <= MAX_NUDGE; d += STEP) {
-        if (this._canMove(x + d, y, half)) return x + d;
-        if (this._canMove(x - d, y, half)) return x - d;
-      }
-      return x; // no correction possible
-    } else {
-      // Blocked moving horizontally; try nudging Y up or down
-      for (let d = STEP; d <= MAX_NUDGE; d += STEP) {
-        if (this._canMove(x, y + d, half)) return y + d;
-        if (this._canMove(x, y - d, half)) return y - d;
-      }
-      return y; // no correction possible
-    }
-  }
-
-  /**
-   * Check if player bounding box at (x, y) overlaps any non-walkable tile,
-   * excluding tiles that have the player's own active bombs.
-   */
-  _canMove(x, y, half) {
-    const corners = [
-      { cx: x - half, cy: y - half },
-      { cx: x + half, cy: y - half },
-      { cx: x - half, cy: y + half },
-      { cx: x + half, cy: y + half },
-    ];
-    for (const { cx, cy } of corners) {
-      const { col, row } = pixelToTile(cx, cy, TILE_SIZE);
-      if (!isWalkable(this.map, col, row)) return false;
-      // Bomb blocks movement unless this player is still in the process of leaving it
-      if (this.bombManager.hasBombAt(col, row)) {
-        if (!this._passableBombs.has(`${col},${row}`)) {
-          return false;
-        }
+  _canMoveCircle(x, y, r) {
+    const col0 = Math.floor((x - r) / TILE_SIZE);
+    const col1 = Math.floor((x + r) / TILE_SIZE);
+    const row0 = Math.floor((y - r) / TILE_SIZE);
+    const row1 = Math.floor((y + r) / TILE_SIZE);
+    for (let row = row0; row <= row1; row++) {
+      for (let col = col0; col <= col1; col++) {
+        const solid = !isWalkable(this.map, col, row) ||
+                      (this.bombManager.hasBombAt(col, row) && !this._passableBombs.has(`${col},${row}`));
+        if (!solid) continue;
+        const nearX = Phaser.Math.Clamp(x, col * TILE_SIZE, (col + 1) * TILE_SIZE);
+        const nearY = Phaser.Math.Clamp(y, row * TILE_SIZE, (row + 1) * TILE_SIZE);
+        const dx = x - nearX, dy = y - nearY;
+        if (dx * dx + dy * dy < r * r) return false;
       }
     }
     return true;
   }
 
-  /** Returns true if player hitbox at (px, py) overlaps tile (col, row) at all */
-  _overlapsRect(px, py, half, col, row) {
-    const tileLeft  = col * TILE_SIZE;
-    const tileRight = tileLeft + TILE_SIZE;
-    const tileTop   = row  * TILE_SIZE;
-    const tileBot   = tileTop + TILE_SIZE;
-    return px + half > tileLeft && px - half < tileRight &&
-           py + half > tileTop  && py - half < tileBot;
+  /**
+   * Moves coord toward the nearest tile center by at most maxStep.
+   * Used for corridor-entry assist when cardinal movement is blocked.
+   */
+  _snapToCenter(coord, T, maxStep) {
+    const tile   = Math.floor(coord / T);
+    const c1     = tile * T + T / 2;
+    const c2     = (tile + 1) * T + T / 2;
+    const target = Math.abs(coord - c1) <= Math.abs(coord - c2) ? c1 : c2;
+    const diff   = target - coord;
+    if (diff === 0) return coord;
+    return coord + Math.min(Math.abs(diff), maxStep) * Math.sign(diff);
+  }
+
+  /** Returns true if circle at (px,py) with radius r overlaps tile (col,row) */
+  _overlapsCircle(px, py, r, col, row) {
+    const nearX = Phaser.Math.Clamp(px, col * TILE_SIZE, (col + 1) * TILE_SIZE);
+    const nearY = Phaser.Math.Clamp(py, row * TILE_SIZE, (row + 1) * TILE_SIZE);
+    const dx = px - nearX, dy = py - nearY;
+    return dx * dx + dy * dy < r * r;
   }
 
   _tryPlaceBomb() {
