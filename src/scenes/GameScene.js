@@ -49,7 +49,8 @@ export class GameScene extends Phaser.Scene {
       this._stateSeq    = 0;
       this._netAccum    = 0;
       this._eventBuffer = [];
-      this._remoteInputs = {};
+      this._remoteInputs    = {};
+      this._remotePositions = {};
     }
 
     // Online client: bomb sprites managed separately (no timer logic)
@@ -353,7 +354,8 @@ export class GameScene extends Phaser.Scene {
       const myInput = this.inputManager.getState(0);
       this.players[this.myPlayerIndex]?.update(delta, myInput);
 
-      // Send inputs to host (every frame — server/network throttles naturally)
+      // Send inputs + authoritative client position to host
+      const myPlayer = this.players[this.myPlayerIndex];
       networkManager.sendInput({
         up:          myInput.up,
         down:        myInput.down,
@@ -361,6 +363,9 @@ export class GameScene extends Phaser.Scene {
         right:       myInput.right,
         bombJust:    myInput.bombJust,
         actionJust:  myInput.actionJust,
+        x:  myPlayer ? Math.round(myPlayer.x) : 0,
+        y:  myPlayer ? Math.round(myPlayer.y) : 0,
+        fr: myPlayer ? (myPlayer._walkFrame || 0) : 0,
       });
 
       // Apply latest received state
@@ -380,14 +385,23 @@ export class GameScene extends Phaser.Scene {
       for (let i = 0; i < this.players.length; i++) {
         let input;
         if (this.isOnlineHost) {
-          // Host always uses keybinding 0 for themselves (playerIndex 0)
-          input = i === 0
-            ? this.inputManager.getState(0)
-            : (this._remoteInputs[i] || _emptyInput());
+          if (i === 0) {
+            // Host controls their own player normally
+            input = this.inputManager.getState(0);
+            this.players[i].update(delta, input);
+          } else {
+            // Client-authoritative: use position reported by the client
+            input = this._remoteInputs[i];
+            if (input && input.x !== undefined) {
+              this.players[i].sprite.setPosition(input.x, input.y);
+              this.players[i]._walkFrame = input.fr || 0;
+            }
+            this.players[i].updateActionsOnly(delta, input || _emptyInput());
+          }
         } else {
           input = this.inputManager.getState(i);
+          this.players[i].update(delta, input);
         }
-        this.players[i].update(delta, input);
       }
 
       this.itemManager.checkPickups(this.players);
@@ -510,19 +524,16 @@ export class GameScene extends Phaser.Scene {
             }
           }
         } else {
-          // Own player: apply death/respawn transitions, then reconcile position
-          const dx = Math.abs(p.x - ps.x);
-          const dy = Math.abs(p.y - ps.y);
-
+          // Own player: client is authoritative for position.
+          // Only apply state transitions (death / respawn), never snap during movement.
           if (p.alive && !ps.al) {
-            // Just died
+            // Host confirmed death
             p.sprite.setTexture(`player_${i}_dead`);
             p.sprite.setAlpha(0.6);
             p.sprite.setDepth(1);
             p.label.setAlpha(0.3);
-            p.sprite.setPosition(ps.x, ps.y);
           } else if (!p.alive && ps.al) {
-            // Just respawned — snap to authoritative position and flash
+            // Host confirmed respawn — snap to spawn point and flash
             p.sprite.setPosition(ps.x, ps.y);
             p.sprite.setTexture(`player_${i}_idle`);
             p.sprite.setAlpha(1);
@@ -535,9 +546,8 @@ export class GameScene extends Phaser.Scene {
               duration: 200, repeat: 6, yoyo: true,
               onComplete: () => { if (p.sprite.active) p.sprite.setAlpha(1); },
             });
-          } else if (dx > 28 || dy > 28) {
-            p.sprite.setPosition(ps.x, ps.y);
           }
+          // No position reconciliation — client position is never overridden
         }
 
         p.alive           = ps.al;

@@ -127,6 +127,35 @@ export class Player {
     this.label.setPosition(this.sprite.x, this.sprite.y - TILE_SIZE / 2 - 4);
   }
 
+  /**
+   * Used by the host for client-authoritative remote players.
+   * Runs curse ticking, bomb placement and remote detonation — but NOT movement.
+   * Position is set directly from the client-reported coordinates before this call.
+   */
+  updateActionsOnly(delta, input) {
+    if (!this.alive || !this.sprite.active) return;
+
+    // Skull curse tick
+    if (this.stunned) {
+      this.curseTimer -= delta;
+      if (this.curseTimer <= 0) this._clearCurse();
+    }
+
+    if (!input) return;
+
+    // Remote detonation
+    if (input.actionJust && this.stats.remote && this.pendingRemote.length > 0) {
+      const bomb = this.pendingRemote.shift();
+      if (bomb && !bomb.exploded) bomb.detonate();
+    }
+
+    // Place bomb
+    if (input.bombJust) this._tryPlaceBomb();
+
+    // Keep label synced to sprite (position was set externally)
+    this.label.setPosition(this.sprite.x, this.sprite.y - TILE_SIZE / 2 - 4);
+  }
+
   _handleMovement(delta, input) {
     const speed = this.stunned ? this.stats.speed * 2 : this.stats.speed;
     let vx = 0, vy = 0;
@@ -162,15 +191,32 @@ export class Player {
 
     const half = TILE_SIZE / 2 - 4;  // player half-width with slight inset for smooth movement
 
-    const canMoveX = this._canMove(newX, this.sprite.y, half);
-    const canMoveY = this._canMove(this.sprite.x, newY, half);
+    let finalX = this.sprite.x;
+    let finalY = this.sprite.y;
 
-    this.sprite.x = canMoveX ? newX : this.sprite.x;
-    this.sprite.y = canMoveY ? newY : this.sprite.y;
+    if (this._canMove(newX, this.sprite.y, half)) {
+      finalX = newX;
+    } else if (vx !== 0) {
+      // Corner correction on X: if blocked horizontally, nudge Y to slide past corners
+      finalY = this._cornerCorrect(newX, this.sprite.y, half, false);
+    }
+
+    if (this._canMove(this.sprite.x, newY, half)) {
+      finalY = newY;
+    } else if (vy !== 0) {
+      // Corner correction on Y: if blocked vertically, nudge X to slide past corners
+      finalX = this._cornerCorrect(this.sprite.x, newY, half, true);
+    }
+
+    const prevX = this.sprite.x;
+    const prevY = this.sprite.y;
+
+    this.sprite.x = finalX;
+    this.sprite.y = finalY;
 
     // Track effective velocity for network dead-reckoning
-    this._lastMoveVx = canMoveX ? vx : 0;
-    this._lastMoveVy = canMoveY ? vy : 0;
+    this._lastMoveVx = (finalX !== prevX) ? vx : 0;
+    this._lastMoveVy = (finalY !== prevY) ? vy : 0;
 
     // Remove bombs from passable set once the player's hitbox no longer overlaps them
     for (const key of this._passableBombs) {
@@ -180,7 +226,7 @@ export class Player {
       }
     }
 
-    const moving = (canMoveX && vx !== 0) || (canMoveY && vy !== 0);
+    const moving = (finalX !== prevX) || (finalY !== prevY);
 
     if (moving) {
       this._walkTimer += delta;
@@ -192,6 +238,40 @@ export class Player {
     } else {
       this._walkFrame = 0;
       this.sprite.setTexture(`player_${this.index}_idle`);
+    }
+  }
+
+  /**
+   * Corner correction: when movement in direction `axis` is blocked,
+   * check if a small perpendicular nudge would let the player slide past
+   * the corner of a tile. Returns the corrected perpendicular coordinate if
+   * a nudge is possible, otherwise returns the original value unchanged.
+   *
+   * @param {number}  x        proposed x position
+   * @param {number}  y        proposed y position
+   * @param {number}  half     hitbox half-size
+   * @param {boolean} nudgeX   true → nudge X (blocked vertically), false → nudge Y
+   * @returns {number} corrected x or y
+   */
+  _cornerCorrect(x, y, half, nudgeX) {
+    // Maximum nudge distance — just under half a tile so we never skip over walls
+    const MAX_NUDGE = TILE_SIZE * 0.45;
+    const STEP      = 1;
+
+    if (nudgeX) {
+      // Blocked moving vertically; try nudging X left or right
+      for (let d = STEP; d <= MAX_NUDGE; d += STEP) {
+        if (this._canMove(x + d, y, half)) return x + d;
+        if (this._canMove(x - d, y, half)) return x - d;
+      }
+      return x; // no correction possible
+    } else {
+      // Blocked moving horizontally; try nudging Y up or down
+      for (let d = STEP; d <= MAX_NUDGE; d += STEP) {
+        if (this._canMove(x, y + d, half)) return y + d;
+        if (this._canMove(x, y - d, half)) return y - d;
+      }
+      return y; // no correction possible
     }
   }
 
