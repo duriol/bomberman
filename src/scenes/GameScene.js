@@ -75,15 +75,16 @@ export class GameScene extends Phaser.Scene {
       },
       (col, row, owner) => {
         if (this.isOnlineClient) return; // host is authoritative for hits
-        // Hit all players on this tile
+        // Kill all players on this tile — collect first so simultaneous deaths
+        // are all registered before _checkRoundEnd runs.
+        const dying = [];
         for (const player of this.players) {
           if (!player.alive) continue;
           const pt = player.tilePos;
-          if (pt.col === col && pt.row === row) {
-            player.die();
-            this._scheduleRespawn(player);
-          }
+          if (pt.col === col && pt.row === row) dying.push(player);
         }
+        for (const player of dying) player.die();
+        for (const player of dying) this._scheduleRespawn(player);
         // Destroy items on this tile
         this.itemManager.destroyAt(col, row);
       },
@@ -334,7 +335,8 @@ export class GameScene extends Phaser.Scene {
     if (this._gameOver) return;
     this._gameOver = true;
     this._winnerIndex = winner ? winner.index : -1;
-    this._timerEvent.remove();
+    if (this._timerEvent) { this._timerEvent.remove(); this._timerEvent = null; }
+    if (this._spiralEvent) { this._spiralEvent.remove(); this._spiralEvent = null; }
     audioManager.stopBGM();
 
     // Online host: send final event and one last state
@@ -555,6 +557,15 @@ export class GameScene extends Phaser.Scene {
     this._spiralTiles = this._generateSpiralOrder();
     this._spiralIndex = 0;
 
+    // Timer no longer matters once the spiral starts — stop it so it can't
+    // trigger _endRound(null) at t=0 while players wait to respawn.
+    if (this._timerEvent) {
+      this._timerEvent.remove();
+      this._timerEvent = null;
+    }
+    this._timerText.setText('💀');
+    this._timerText.setStyle({ color: '#ff4444' });
+
     const warn = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, '¡EL MAPA SE CIERRA!', {
       fontSize: '28px', fontFamily: 'monospace',
       color: '#ff4400', stroke: '#000000', strokeThickness: 5,
@@ -580,14 +591,22 @@ export class GameScene extends Phaser.Scene {
 
       this.itemManager.destroyAt(col, row);
 
+      // Collect all players on this tile before processing deaths so that
+      // simultaneous kills (e.g. two players on same tile) are all registered
+      // before _checkRoundEnd runs — otherwise the first death incorrectly
+      // declares the second player the winner.
+      const dying = [];
       for (const player of this.players) {
         if (!player.alive) continue;
         const pt = player.tilePos;
-        if (pt.col === col && pt.row === row) {
-          player.die();
-          this._scheduleRespawn(player);
-          if (this.isOnlineHost) this._eventBuffer.push({ t: 'death', pi: player.index });
-        }
+        if (pt.col === col && pt.row === row) dying.push(player);
+      }
+      for (const player of dying) {
+        player.die();
+        if (this.isOnlineHost) this._eventBuffer.push({ t: 'death', pi: player.index });
+      }
+      for (const player of dying) {
+        this._scheduleRespawn(player);
       }
 
       const flash = this.add.graphics().setDepth(7);

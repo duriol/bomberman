@@ -44,7 +44,7 @@ export const DEFAULT_PLAYER_STATS = {
   maxBombs: 1,
   bombRange: 2,
   speed: 160,   // px/s
-  lives: 3,
+  lives: 1,
   remote: false,
   pierce: false,
   kick: false,
