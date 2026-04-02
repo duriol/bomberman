@@ -17,7 +17,7 @@ const config = {
     },
   },
   scene: [MenuScene, LobbyScene, GameScene],
-  parent: document.body,
+  parent: 'game-canvas',
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,

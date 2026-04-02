@@ -57,6 +57,16 @@ export class Player {
     this._facing = 'down';
     this._walkTimer = 0;
     this._walkFrame = 0;
+    this._lastMoveVx = 0;
+    this._lastMoveVy = 0;
+
+    // Network interpolation (used by remote clients)
+    this._netBaseX    = null;
+    this._netBaseY    = null;
+    this._netVx       = 0;
+    this._netVy       = 0;
+    this._netSpeed    = 160;
+    this._netTimestamp = 0;
   }
 
   _createAnims() {
@@ -133,13 +143,17 @@ export class Player {
       const d = dirs[this._stunDir] || dirs[0];
       vx = d.vx;
       vy = d.vy;
+    } else if (input.joy) {
+      // Analog joystick: already a unit vector, no diagonal penalty needed
+      vx = input.joy.vx;
+      vy = input.joy.vy;
     } else {
       if (input.up)    vy = -1;
       if (input.down)  vy =  1;
       if (input.left)  vx = -1;
       if (input.right) vx =  1;
 
-      // Normalize diagonal
+      // Normalize diagonal (keyboard only — prevents speed boost on diagonals)
       if (vx !== 0 && vy !== 0) { vx *= 0.707; vy *= 0.707; }
     }
 
@@ -153,6 +167,10 @@ export class Player {
 
     this.sprite.x = canMoveX ? newX : this.sprite.x;
     this.sprite.y = canMoveY ? newY : this.sprite.y;
+
+    // Track effective velocity for network dead-reckoning
+    this._lastMoveVx = canMoveX ? vx : 0;
+    this._lastMoveVy = canMoveY ? vy : 0;
 
     // Remove bombs from passable set once the player's hitbox no longer overlaps them
     for (const key of this._passableBombs) {
@@ -294,14 +312,56 @@ export class Player {
     this.activeBombs = 0;
     this.pendingRemote = [];
     if (this.onEvent) this.onEvent({ t: 'respawn', pi: this.index, x: pos.x, y: pos.y });
-    // Brief invincibility flash
+    // Brief invincibility flash — onComplete guarantees alpha=1 (yoyo ends at 'from')
     this.scene.tweens.add({
       targets: this.sprite,
       alpha:   { from: 0.3, to: 1 },
       duration: 200,
       repeat:   6,
       yoyo:     true,
+      onComplete: () => { if (this.sprite.active) this.sprite.setAlpha(1); },
     });
+  }
+
+  // ── Network interpolation (remote clients only) ──────────────────────────
+
+  /**
+   * Called by the client when a new authoritative snapshot arrives.
+   * Stores the base position + velocity for dead-reckoning extrapolation.
+   * @param {number} x     Authoritative pixel x
+   * @param {number} y     Authoritative pixel y
+   * @param {number} vx    Normalized velocity x (−1 / 0 / 1, can be fractional for diagonals)
+   * @param {number} vy    Normalized velocity y
+   * @param {number} speed Authoritative speed in px/s
+   */
+  setNetworkTarget(x, y, vx, vy, speed) {
+    this._netBaseX     = x;
+    this._netBaseY     = y;
+    this._netVx        = vx;
+    this._netVy        = vy;
+    this._netSpeed     = speed;
+    this._netTimestamp = performance.now();
+  }
+
+  /**
+   * Called every frame by the client for remote players.
+   * Extrapolates the expected position from the last snapshot using dead-reckoning,
+   * then smoothly lerps the sprite toward it to eliminate pop/teleportation.
+   */
+  interpolateToNetwork(delta) {
+    if (this._netBaseX === null) return;
+
+    // Extrapolate forward from last snapshot (cap at 200 ms to avoid over-shooting)
+    const elapsed = Math.min((performance.now() - this._netTimestamp) / 1000, 0.2);
+    const targetX = this._netBaseX + this._netVx * this._netSpeed * elapsed;
+    const targetY = this._netBaseY + this._netVy * this._netSpeed * elapsed;
+
+    // Exponential lerp — framerate-independent, settles within ~150 ms
+    const alpha = 1 - Math.exp(-20 * delta / 1000);
+    this.sprite.x = Phaser.Math.Linear(this.sprite.x, targetX, alpha);
+    this.sprite.y = Phaser.Math.Linear(this.sprite.y, targetY, alpha);
+
+    this.label.setPosition(this.sprite.x, this.sprite.y - TILE_SIZE / 2 - 4);
   }
 
   destroy() {

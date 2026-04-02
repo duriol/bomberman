@@ -73,14 +73,39 @@ export class InputManager {
   getState(playerIndex) {
     const k = this.keys[playerIndex];
     if (!k) return null;
-    return {
-      up:        k.up.isDown,
-      down:      k.down.isDown,
-      left:      k.left.isDown,
-      right:     k.right.isDown,
-      bombJust:  Phaser.Input.Keyboard.JustDown(k.bomb),
+
+    const state = {
+      up:         k.up.isDown,
+      down:       k.down.isDown,
+      left:       k.left.isDown,
+      right:      k.right.isDown,
+      bombJust:   Phaser.Input.Keyboard.JustDown(k.bomb),
       actionJust: Phaser.Input.Keyboard.JustDown(k.action),
     };
+
+    // Merge on-screen controls for player 0 (mobile)
+    if (playerIndex === 0) {
+      const joy  = window._mobileJoystick;
+      const btns = window._mobileBtns;
+      if (joy) {
+        state.up    = state.up    || !!joy.up;
+        state.down  = state.down  || !!joy.down;
+        state.left  = state.left  || !!joy.left;
+        state.right = state.right || !!joy.right;
+        // Analog vector: lets Player skip the 0.707 diagonal normalization
+        if (joy.vx !== 0 || joy.vy !== 0) {
+          state.joy = { vx: joy.vx, vy: joy.vy };
+        }
+      }
+      if (btns) {
+        state.bombJust   = state.bombJust   || !!btns.bomb;
+        state.actionJust = state.actionJust || !!btns.action;
+        btns.bomb   = false;   // one-shot: consumed this frame
+        btns.action = false;
+      }
+    }
+
+    return state;
   }
 
   destroy() {

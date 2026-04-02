@@ -368,6 +368,13 @@ export class GameScene extends Phaser.Scene {
         this._applyRemoteState(this._pendingState);
         this._pendingState = null;
       }
+
+      // Interpolate remote players toward their extrapolated network position every frame
+      for (let i = 0; i < this.players.length; i++) {
+        if (i !== this.myPlayerIndex) {
+          this.players[i].interpolateToNetwork(delta);
+        }
+      }
     } else {
       // ── Host / local-multiplayer mode ─────────────────────────────────────
       for (let i = 0; i < this.players.length; i++) {
@@ -386,10 +393,10 @@ export class GameScene extends Phaser.Scene {
       this.itemManager.checkPickups(this.players);
       this._checkRoundEnd();
 
-      // Broadcast state if online host (20 hz)
+      // Broadcast state if online host (30 hz)
       if (this.isOnlineHost) {
         this._netAccum += delta;
-        if (this._netAccum >= 50) {
+        if (this._netAccum >= 33) {
           this._netAccum = 0;
           networkManager.sendGameState(this._serializeState());
         }
@@ -418,6 +425,8 @@ export class GameScene extends Phaser.Scene {
       pl: this.players.map(p => ({
         x:   Math.round(p.x),
         y:   Math.round(p.y),
+        vx:  p._lastMoveVx || 0,
+        vy:  p._lastMoveVy || 0,
         al:  p.alive,
         lv:  p.lives,
         mb:  p.stats.maxBombs,
@@ -477,25 +486,58 @@ export class GameScene extends Phaser.Scene {
         if (!p) return;
 
         if (i !== this.myPlayerIndex) {
-          // Other players: set position directly from authoritative state
-          p.sprite.setPosition(ps.x, ps.y);
+          // Other players: interpolate toward authoritative position
           if (ps.al) {
+            p.setNetworkTarget(ps.x, ps.y, ps.vx || 0, ps.vy || 0, ps.sp || 160);
+            // Snap immediately on respawn (avoid sliding from death tile)
+            if (!p.alive) {
+              p.sprite.setPosition(ps.x, ps.y);
+              p.sprite.setAlpha(1);
+              p.sprite.setDepth(10);
+              p.label.setPosition(ps.x, ps.y - 28);
+              p.label.setAlpha(1);
+            }
             p.sprite.setTexture(`player_${i}_walk_${ps.fr}`);
-          } else if (p.alive && !ps.al) {
+          } else {
+            // Dead: snap directly, no interpolation needed
+            p.sprite.setPosition(ps.x, ps.y);
+            p.label.setPosition(ps.x, ps.y - 28);
+            if (p.alive && !ps.al) {
+              p.sprite.setTexture(`player_${i}_dead`);
+              p.sprite.setAlpha(0.6);
+              p.sprite.setDepth(1);
+              p.label.setAlpha(0.3);
+            }
+          }
+        } else {
+          // Own player: apply death/respawn transitions, then reconcile position
+          const dx = Math.abs(p.x - ps.x);
+          const dy = Math.abs(p.y - ps.y);
+
+          if (p.alive && !ps.al) {
+            // Just died
             p.sprite.setTexture(`player_${i}_dead`);
             p.sprite.setAlpha(0.6);
             p.sprite.setDepth(1);
             p.label.setAlpha(0.3);
+            p.sprite.setPosition(ps.x, ps.y);
           } else if (!p.alive && ps.al) {
+            // Just respawned — snap to authoritative position and flash
+            p.sprite.setPosition(ps.x, ps.y);
+            p.sprite.setTexture(`player_${i}_idle`);
             p.sprite.setAlpha(1);
             p.sprite.setDepth(10);
+            p.sprite.clearTint();
             p.label.setAlpha(1);
+            p.label.setPosition(ps.x, ps.y - 28);
+            this.tweens.add({
+              targets: p.sprite, alpha: { from: 0.3, to: 1 },
+              duration: 200, repeat: 6, yoyo: true,
+              onComplete: () => { if (p.sprite.active) p.sprite.setAlpha(1); },
+            });
+          } else if (dx > 28 || dy > 28) {
+            p.sprite.setPosition(ps.x, ps.y);
           }
-        } else {
-          // Own player: reconcile — only snap if too far off
-          const dx = Math.abs(p.x - ps.x);
-          const dy = Math.abs(p.y - ps.y);
-          if (dx > 28 || dy > 28) p.sprite.setPosition(ps.x, ps.y);
         }
 
         p.alive           = ps.al;

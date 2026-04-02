@@ -2,22 +2,253 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>Bomberman</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
     body {
       background: #111;
       display: flex;
-      justify-content: center;
-      align-items: center;
       height: 100vh;
+      height: 100dvh;
       overflow: hidden;
     }
-    canvas { display: block; }
+
+    canvas {
+      display: block;
+      touch-action: none;
+    }
+
+    /* Desktop: game-canvas fills the viewport; Phaser Scale.FIT centers within it */
+    #game-canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    #mobile-controls { display: none; }
+
+    /* ── Mobile portrait (touch devices) ──────────────────────────── */
+    @media (orientation: portrait) and (pointer: coarse) {
+      body { flex-direction: column; }
+
+      #game-canvas {
+        flex: 1 1 auto;
+        height: auto;
+        min-height: 0;
+        width: 100%;
+      }
+
+      #mobile-controls {
+        display: flex;
+        width: 100%;
+        flex: 0 0 200px;
+        background: #0c0c1e;
+        border-top: 2px solid #1e2a4a;
+        padding: 16px 28px;
+        align-items: center;
+        justify-content: space-between;
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      /* ── Joystick ──────────────────────────────────────────────── */
+      #joystick-zone {
+        width: 148px;
+        height: 148px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      #joystick-base {
+        width: 124px;
+        height: 124px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.055);
+        border: 2px solid rgba(255,255,255,0.15);
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      #joystick-knob {
+        width: 52px;
+        height: 52px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 38% 30%, rgba(255,255,255,0.65), rgba(160,160,220,0.30));
+        border: 2px solid rgba(255,255,255,0.55);
+        position: absolute;
+        pointer-events: none;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.45);
+      }
+
+      /* ── Buttons ───────────────────────────────────────────────── */
+      #buttons-area {
+        display: flex;
+        gap: 18px;
+        align-items: center;
+      }
+
+      .mobile-btn {
+        width: 78px;
+        height: 78px;
+        border-radius: 50%;
+        border: none;
+        outline: none;
+        font-size: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        -webkit-user-select: none;
+        user-select: none;
+        touch-action: none;
+        -webkit-tap-highlight-color: transparent;
+        box-shadow: 0 5px 18px rgba(0,0,0,0.55), inset 0 1px 1px rgba(255,255,255,0.18);
+        transition: transform 0.07s, box-shadow 0.07s;
+      }
+
+      .mobile-btn.pressed {
+        transform: scale(0.86);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+      }
+
+      #btn-bomb {
+        background: radial-gradient(circle at 38% 32%, #ff7e42, #b03020);
+      }
+
+      #btn-action {
+        background: radial-gradient(circle at 38% 32%, #fce76a, #c59a10);
+      }
+    }
   </style>
 </head>
 <body>
+  <div id="game-canvas"></div>
+
+  <div id="mobile-controls">
+    <div id="joystick-zone">
+      <div id="joystick-base">
+        <div id="joystick-knob"></div>
+      </div>
+    </div>
+    <div id="buttons-area">
+      <button class="mobile-btn" id="btn-action">⚡</button>
+      <button class="mobile-btn" id="btn-bomb">💣</button>
+    </div>
+  </div>
+
   <script type="module" src="/src/main.js"></script>
+  <script>
+    /* ── Mobile virtual controls ──────────────────────────────────
+       Writes to window._mobileJoystick and window._mobileBtns.
+       InputManager.getState(0) reads + clears these each frame.
+    ─────────────────────────────────────────────────────────────── */
+    (function () {
+      'use strict';
+
+      window._mobileJoystick = { up: false, down: false, left: false, right: false };
+      window._mobileBtns     = { bomb: false, action: false };
+
+      var zone      = document.getElementById('joystick-zone');
+      var base      = document.getElementById('joystick-base');
+      var knob      = document.getElementById('joystick-knob');
+      var btnBomb   = document.getElementById('btn-bomb');
+      var btnAction = document.getElementById('btn-action');
+
+      var RADIUS  = 36;   // max knob travel from center, px
+      var DEAD    = 14;   // dead-zone radius, px
+      var touchId = null;
+      var cx = 0, cy = 0;
+
+      function updateCenter() {
+        var r = base.getBoundingClientRect();
+        cx = r.left + r.width  * 0.5;
+        cy = r.top  + r.height * 0.5;
+      }
+
+      function moveKnob(tx, ty) {
+        var dx   = tx - cx;
+        var dy   = ty - cy;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        var clamped = Math.min(dist, RADIUS);
+        var angle   = Math.atan2(dy, dx);
+        knob.style.transform =
+          'translate(' + (Math.cos(angle) * clamped) + 'px,' +
+                         (Math.sin(angle) * clamped) + 'px)';
+        var j = window._mobileJoystick;
+        var active = dist >= DEAD;
+        // Normalized analog vector — magnitude always 1 when outside dead-zone
+        j.vx = active ? Math.cos(angle) : 0;
+        j.vy = active ? Math.sin(angle) : 0;
+        // Boolean flags kept for compatibility
+        j.up    = active && dy < -DEAD;
+        j.down  = active && dy >  DEAD;
+        j.left  = active && dx < -DEAD;
+        j.right = active && dx >  DEAD;
+      }
+
+      function resetKnob() {
+        knob.style.transform = 'translate(0px,0px)';
+        var j = window._mobileJoystick;
+        j.vx = 0; j.vy = 0;
+        j.up = j.down = j.left = j.right = false;
+      }
+
+      zone.addEventListener('touchstart', function (e) {
+        e.preventDefault();
+        if (touchId !== null) return;
+        var t = e.changedTouches[0];
+        touchId = t.identifier;
+        updateCenter();
+        moveKnob(t.clientX, t.clientY);
+      }, { passive: false });
+
+      zone.addEventListener('touchmove', function (e) {
+        e.preventDefault();
+        for (var i = 0; i < e.changedTouches.length; i++) {
+          if (e.changedTouches[i].identifier === touchId) {
+            moveKnob(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
+            return;
+          }
+        }
+      }, { passive: false });
+
+      function endJoystick(e) {
+        e.preventDefault();
+        for (var i = 0; i < e.changedTouches.length; i++) {
+          if (e.changedTouches[i].identifier === touchId) {
+            touchId = null;
+            resetKnob();
+            return;
+          }
+        }
+      }
+      zone.addEventListener('touchend',    endJoystick, { passive: false });
+      zone.addEventListener('touchcancel', endJoystick, { passive: false });
+
+      /* ── Buttons ─────────────────────────────────────────────── */
+      function setupBtn(el, field) {
+        el.addEventListener('touchstart', function (e) {
+          e.preventDefault();
+          el.classList.add('pressed');
+          window._mobileBtns[field] = true;   // consumed once by InputManager
+        }, { passive: false });
+        el.addEventListener('touchend', function (e) {
+          e.preventDefault();
+          el.classList.remove('pressed');
+        }, { passive: false });
+        el.addEventListener('touchcancel', function () {
+          el.classList.remove('pressed');
+        }, { passive: false });
+      }
+
+      setupBtn(btnBomb,   'bomb');
+      setupBtn(btnAction, 'action');
+    }());
+  </script>
 </body>
 </html>
