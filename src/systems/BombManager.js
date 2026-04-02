@@ -133,7 +133,11 @@ export class BombManager {
   }
 
   createExplosion(originCol, originRow, range, pierce, owner) {
-    audioManager.playExplosion(range);
+    // On remote clients, visuals and audio come from the host's 'explode' event.
+    // Skip them here to avoid showing the explosion twice.
+    const isClient = !!this.scene.isOnlineClient;
+
+    if (!isClient) audioManager.playExplosion(range);
 
     const tiles = calcExplosionTiles(this.map, originCol, originRow, range, pierce);
 
@@ -144,14 +148,14 @@ export class BombManager {
     for (const { col, row } of tiles) {
       if (this.map[row]?.[col] === TILE.BLOCK) {
         this.map[row][col] = TILE.FLOOR;
-        audioManager.playBlockDestroyed();
+        if (!isClient) audioManager.playBlockDestroyed();
         destroyedBlocks.push({ col, row });
       }
     }
 
     // Spawn explosion visuals and process hits
     for (const { col, row, type } of tiles) {
-      this._spawnExplosionSprite(col, row, type);
+      if (!isClient) this._spawnExplosionSprite(col, row, type);
       if (this.onExplosionHit) this.onExplosionHit(col, row, owner);
       const chainBomb = this.bombs.get(`${col},${row}`);
       if (chainBomb) this.scene.time.delayedCall(80, () => chainBomb.detonate());
