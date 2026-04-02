@@ -143,7 +143,7 @@ export class Player {
       const d = dirs[this._stunDir] || dirs[0];
       vx = d.vx;
       vy = d.vy;
-    } else if (input.joy) {
+    } else if (input.joy && typeof input.joy.vx === 'number' && typeof input.joy.vy === 'number') {
       // Analog joystick: already a unit vector, no diagonal penalty needed
       vx = input.joy.vx;
       vy = input.joy.vy;
