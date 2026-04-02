@@ -30,6 +30,7 @@ export class Player {
     this.stunned = false;  // skull curse flag
     this.curseTimer = 0;
     this.lives   = this.stats.lives;
+    this.respawnInvincible = false;  // true during post-respawn grace period
     this.onEvent = null;  // optional callback for online host event buffering
 
     // Create sprite
@@ -158,13 +159,11 @@ export class Player {
 
   _handleMovement(delta, input) {
     const speed = this.stunned ? this.stats.speed * 2 : this.stats.speed;
-    // Circular hitbox — radius = 3/8 of a tile (18 px for T=48)
-    const R    = Math.round(TILE_SIZE * 3 / 8);
-    const step = speed * (delta / 1000);
+    const R     = Math.round(TILE_SIZE * 3 / 8);   // 18 px
+    const step  = speed * (delta / 1000);
     let vx = 0, vy = 0;
 
     if (this.stunned) {
-      // Random direction during stun
       if (this._stunFlipTimer === undefined) this._stunFlipTimer = 0;
       this._stunFlipTimer -= delta;
       if (this._stunFlipTimer <= 0) {
@@ -173,10 +172,8 @@ export class Player {
       }
       const dirs = [{ vx: 0, vy: -1 }, { vx: 0, vy: 1 }, { vx: -1, vy: 0 }, { vx: 1, vy: 0 }];
       const d = dirs[this._stunDir] || dirs[0];
-      vx = d.vx;
-      vy = d.vy;
-    } else if (input.joy && typeof input.joy.vx === 'number' && typeof input.joy.vy === 'number') {
-      // Analog joystick: already a unit vector, no diagonal penalty needed
+      vx = d.vx; vy = d.vy;
+    } else if (input.joy && typeof input.joy.vx === 'number') {
       vx = input.joy.vx;
       vy = input.joy.vy;
     } else {
@@ -184,42 +181,63 @@ export class Player {
       if (input.down)  vy =  1;
       if (input.left)  vx = -1;
       if (input.right) vx =  1;
-
-      // Normalize diagonal (keyboard only — prevents speed boost on diagonals)
       if (vx !== 0 && vy !== 0) { vx *= 0.707; vy *= 0.707; }
     }
 
-    const newX = this.sprite.x + vx * step;
-    const newY = this.sprite.y + vy * step;
+    const prevX = this.sprite.x;
+    const prevY = this.sprite.y;
+    let finalX  = prevX;
+    let finalY  = prevY;
 
-    // Test each axis independently so the player slides along walls naturally
-    const canX = this._canMoveCircle(newX, this.sprite.y, R);
-    const canY = this._canMoveCircle(this.sprite.x, newY, R);
+    if (vx !== 0 || vy !== 0) {
+      const ax = Math.abs(vx), ay = Math.abs(vy);
+      // Cardinal detection: one axis is dominant (the other is < 50% of it).
+      // Works for both keyboard (axis is 0/1) and analog joystick.
+      const cardinalX = ax > 0 && ay < ax * 0.5;
+      const cardinalY = ay > 0 && ax < ay * 0.5;
+      const alignStep = step * 5;
 
-    let finalX = canX ? newX : this.sprite.x;
-    let finalY = canY ? newY : this.sprite.y;
-
-    // Corridor entry assist: when moving cardinally and one axis is blocked,
-    // smoothly glide toward the nearest tile center on the free axis so the
-    // player slips into corridors without needing pixel-perfect alignment.
-    if (!canX && vx !== 0 && vy === 0) {
-      finalY = this._snapToCenter(this.sprite.y, TILE_SIZE, step);
+      if (cardinalX) {
+        // Horizontal move — snap Y first so collision is tested at the aligned position.
+        // This is what prevents sticking on wall corners.
+        const sy = this._snapToCenter(prevY, TILE_SIZE, alignStep);
+        const nx = prevX + vx * step;
+        if (this._canMoveCircle(nx, sy, R)) {
+          finalX = nx;
+          finalY = sy;
+        } else {
+          // Blocked forward; still apply Y snap if the spot is clear
+          if (this._canMoveCircle(prevX, sy, R)) finalY = sy;
+        }
+      } else if (cardinalY) {
+        // Vertical move — snap X first
+        const sx = this._snapToCenter(prevX, TILE_SIZE, alignStep);
+        const ny = prevY + vy * step;
+        if (this._canMoveCircle(sx, ny, R)) {
+          finalY = ny;
+          finalX = sx;
+        } else {
+          if (this._canMoveCircle(sx, prevY, R)) finalX = sx;
+        }
+      } else {
+        // True diagonal — resolve each axis independently, no snap
+        const nx = prevX + vx * step;
+        const ny = prevY + vy * step;
+        if (this._canMoveCircle(nx, prevY, R)) finalX = nx;
+        if (this._canMoveCircle(prevX, ny, R)) finalY = ny;
+      }
     }
-    if (!canY && vy !== 0 && vx === 0) {
-      finalX = this._snapToCenter(this.sprite.x, TILE_SIZE, step);
-    }
 
-    // Kick bombs: when movement is blocked and player has kick ability,
-    // look for a bomb in the direction of travel and send it sliding.
+    // Kick bombs on blocked axis
     if (this.stats.kick) {
-      if (!canX && vx !== 0) {
+      if (finalX === prevX && vx !== 0) {
         const kdx = Math.sign(vx);
         const { col, row } = this.tilePos;
         const bomb = this.bombManager.bombs.get(`${col + kdx},${row}`)
                   || this.bombManager.bombs.get(`${col},${row}`);
         if (bomb && !bomb.exploded) bomb.kick(kdx, 0);
       }
-      if (!canY && vy !== 0) {
+      if (finalY === prevY && vy !== 0) {
         const kdy = Math.sign(vy);
         const { col, row } = this.tilePos;
         const bomb = this.bombManager.bombs.get(`${col},${row + kdy}`)
@@ -227,9 +245,6 @@ export class Player {
         if (bomb && !bomb.exploded) bomb.kick(0, kdy);
       }
     }
-
-    const prevX = this.sprite.x;
-    const prevY = this.sprite.y;
 
     this.sprite.x = finalX;
     this.sprite.y = finalY;
@@ -271,13 +286,19 @@ export class Player {
     const col1 = Math.floor((x + r) / TILE_SIZE);
     const row0 = Math.floor((y - r) / TILE_SIZE);
     const row1 = Math.floor((y + r) / TILE_SIZE);
+    // Inset for wall tiles — creates rounded-corner feel so players glide around wall corners
+    const WALL_PAD = 4;
     for (let row = row0; row <= row1; row++) {
       for (let col = col0; col <= col1; col++) {
-        const solid = !isWalkable(this.map, col, row) ||
-                      (this.bombManager.hasBombAt(col, row) && !this._passableBombs.has(`${col},${row}`));
+        const tileType = this.map[row]?.[col];
+        const isBomb = this.bombManager.hasBombAt(col, row) && !this._passableBombs.has(`${col},${row}`);
+        const solid = (tileType === TILE.WALL || tileType === TILE.BLOCK) || isBomb;
         if (!solid) continue;
-        const nearX = Phaser.Math.Clamp(x, col * TILE_SIZE, (col + 1) * TILE_SIZE);
-        const nearY = Phaser.Math.Clamp(y, row * TILE_SIZE, (row + 1) * TILE_SIZE);
+        // Wall tiles use inset AABB so corners are passable (rounded feel)
+        // Destructible blocks and bombs keep full AABB for exact collisions
+        const pad = tileType === TILE.WALL ? WALL_PAD : 0;
+        const nearX = Phaser.Math.Clamp(x, col * TILE_SIZE + pad, (col + 1) * TILE_SIZE - pad);
+        const nearY = Phaser.Math.Clamp(y, row * TILE_SIZE + pad, (row + 1) * TILE_SIZE - pad);
         const dx = x - nearX, dy = y - nearY;
         if (dx * dx + dy * dy < r * r) return false;
       }
@@ -364,6 +385,7 @@ export class Player {
   /** Called when this player gets hit by an explosion */
   die() {
     if (!this.alive) return;
+    if (this.respawnInvincible) return;  // grace period after respawn
     audioManager.playPlayerDeath();
     this.alive = false;
     this.sprite.setTexture(`player_${this.index}_dead`);
@@ -389,6 +411,8 @@ export class Player {
     this.stunned = false;
     this.activeBombs = 0;
     this.pendingRemote = [];
+    this.respawnInvincible = true;
+    this.scene.time.delayedCall(1500, () => { this.respawnInvincible = false; });
     if (this.onEvent) this.onEvent({ t: 'respawn', pi: this.index, x: pos.x, y: pos.y });
     // Brief invincibility flash — onComplete guarantees alpha=1 (yoyo ends at 'from')
     this.scene.tweens.add({
