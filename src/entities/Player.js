@@ -209,6 +209,25 @@ export class Player {
       finalX = this._snapToCenter(this.sprite.x, TILE_SIZE, step);
     }
 
+    // Kick bombs: when movement is blocked and player has kick ability,
+    // look for a bomb in the direction of travel and send it sliding.
+    if (this.stats.kick) {
+      if (!canX && vx !== 0) {
+        const kdx = Math.sign(vx);
+        const { col, row } = this.tilePos;
+        const bomb = this.bombManager.bombs.get(`${col + kdx},${row}`)
+                  || this.bombManager.bombs.get(`${col},${row}`);
+        if (bomb && !bomb.exploded) bomb.kick(kdx, 0);
+      }
+      if (!canY && vy !== 0) {
+        const kdy = Math.sign(vy);
+        const { col, row } = this.tilePos;
+        const bomb = this.bombManager.bombs.get(`${col},${row + kdy}`)
+                  || this.bombManager.bombs.get(`${col},${row}`);
+        if (bomb && !bomb.exploded) bomb.kick(0, kdy);
+      }
+    }
+
     const prevX = this.sprite.x;
     const prevY = this.sprite.y;
 

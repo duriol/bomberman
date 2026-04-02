@@ -79,16 +79,29 @@ class Bomb {
   }
 
   kick(dx, dy) {
+    if (this._sliding) return;
+    audioManager.playKick();
+    this._slide(dx, dy);
+  }
+
+  /** Slides the bomb one tile in direction (dx,dy), then schedules the next slide. */
+  _slide(dx, dy) {
+    if (this.exploded) { this._sliding = false; return; }
     const newCol = this.col + dx;
     const newRow = this.row + dy;
-    if (!this.manager._isKickable(newCol, newRow)) return;
+    if (!this.manager._isKickable(newCol, newRow)) {
+      this._sliding = false;
+      return;
+    }
+    this._sliding = true;
     this.manager.bombs.delete(`${this.col},${this.row}`);
     this.col = newCol;
     this.row = newRow;
     this.manager.bombs.set(`${this.col},${this.row}`, this);
     const pos = tileToPixel(newCol, newRow, TILE_SIZE);
-    this.scene.tweens.add({ targets: this.sprite, x: pos.x, y: pos.y, duration: 130, ease: 'Linear' });
-    audioManager.playKick();
+    this.scene.tweens.add({ targets: this.sprite, x: pos.x, y: pos.y, duration: 120, ease: 'Linear' });
+    // Schedule next tile — slightly shorter than tween so motion feels continuous
+    this.scene.time.delayedCall(118, () => this._slide(dx, dy));
   }
 
   destroy() {
@@ -122,24 +135,32 @@ export class BombManager {
   createExplosion(originCol, originRow, range, pierce, owner) {
     audioManager.playExplosion(range);
 
-    // First pass: destroy blocks so map updates before final tile calculation
-    const firstPass = calcExplosionTiles(this.map, originCol, originRow, range, pierce);
-    for (const { col, row } of firstPass) {
+    const tiles = calcExplosionTiles(this.map, originCol, originRow, range, pierce);
+
+    // Collect blocks that will be destroyed so we can update the map before
+    // spawning explosion sprites, but defer item-drop callbacks until AFTER
+    // onExplosionHit runs (to prevent items from being destroyed immediately).
+    const destroyedBlocks = [];
+    for (const { col, row } of tiles) {
       if (this.map[row]?.[col] === TILE.BLOCK) {
         this.map[row][col] = TILE.FLOOR;
         audioManager.playBlockDestroyed();
-        if (this.onBlockDestroyed) this.onBlockDestroyed(col, row);
+        destroyedBlocks.push({ col, row });
       }
     }
 
-    // Second pass with updated map
-    const tiles = calcExplosionTiles(this.map, originCol, originRow, range, pierce);
-
+    // Spawn explosion visuals and process hits
     for (const { col, row, type } of tiles) {
       this._spawnExplosionSprite(col, row, type);
       if (this.onExplosionHit) this.onExplosionHit(col, row, owner);
       const chainBomb = this.bombs.get(`${col},${row}`);
       if (chainBomb) this.scene.time.delayedCall(80, () => chainBomb.detonate());
+    }
+
+    // Notify block destruction AFTER explosion hits so items spawn
+    // after destroyAt has already run — they won’t be immediately removed.
+    for (const { col, row } of destroyedBlocks) {
+      if (this.onBlockDestroyed) this.onBlockDestroyed(col, row);
     }
 
     if (this.onExplosionEvent) {

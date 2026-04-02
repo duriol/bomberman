@@ -243,39 +243,104 @@ function drawExplosionTile(g, type) {
 // ── Items ────────────────────────────────────────────────────────────────────
 
 const ITEM_CONFIGS = {
-  bomb_up:  { bg: 0xdd2222, symbol: 'B+', emoji: '+' },
-  fire_up:  { bg: 0xff6600, symbol: 'F+', emoji: '🔥' },
-  speed_up: { bg: 0x2288ff, symbol: 'S+', emoji: '↑' },
-  remote:   { bg: 0xaa22aa, symbol: 'RC', emoji: '📡' },
-  pierce:   { bg: 0x22aaaa, symbol: 'P',  emoji: '⚡' },
-  kick:     { bg: 0xaaaa22, symbol: 'K',  emoji: '👟' },
-  skull:    { bg: 0x555555, symbol: '💀', emoji: '?' },
+  bomb_up:  { bg: 0xdd2222, label: '+1',  labelColor: '#ffffff' },
+  fire_up:  { bg: 0xff6600, label: '+1',  labelColor: '#ffffff' },
+  speed_up: { bg: 0x2288ff, label: '+1',  labelColor: '#ffffff' },
+  remote:   { bg: 0xaa22aa, label: 'RC',  labelColor: '#ffffff' },
+  pierce:   { bg: 0x22aaaa, label: '>>',  labelColor: '#ffffff' },
+  kick:     { bg: 0xaaaa22, label: 'KCK', labelColor: '#111111' },
+  skull:    { bg: 0x555555, label: '☠',   labelColor: '#ff4444' },
+};
+
+// Icons drawn via CanvasTexture so we can overlay text glyphs on the coloured badge.
+// Each item has: a coloured rounded square, a small icon on top, and a text label below.
+const ITEM_ICONS = {
+  bomb_up:  '💣',
+  fire_up:  '🔥',
+  speed_up: '⚡',
+  remote:   '📡',
+  pierce:   '➡',
+  kick:     '👟',
+  skull:    '💀',
 };
 
 function generateItems(scene) {
   Object.entries(ITEM_CONFIGS).forEach(([name, cfg]) => {
-    const g = scene.make.graphics({ x: 0, y: 0, add: false });
-    const pad = 6;
-    const r = 6;
+    // Create a canvas and draw the item badge on it
+    const canvas  = document.createElement('canvas');
+    canvas.width  = T;
+    canvas.height = T;
+    const ctx     = canvas.getContext('2d');
+    const pad = 5;
+    const r   = 7;
+    const W   = T - pad * 2;
+    const H   = T - pad * 2;
+
+    // Helper: rounded rect path
+    function roundRect(x, y, w, h, radius) {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + w - radius, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+      ctx.lineTo(x + w, y + h - radius);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+      ctx.lineTo(x + radius, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+    }
 
     // Shadow
-    g.fillStyle(0x000000, 0.3);
-    g.fillRoundedRect(pad + 2, pad + 2, T - pad * 2, T - pad * 2, r);
+    ctx.shadowColor   = 'rgba(0,0,0,0.45)';
+    ctx.shadowBlur    = 5;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 3;
+    roundRect(pad, pad, W, H, r);
+    ctx.fillStyle = '#000';
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
 
-    // Background
-    g.fillStyle(cfg.bg);
-    g.fillRoundedRect(pad, pad, T - pad * 2, T - pad * 2, r);
+    // Background fill
+    const hex = '#' + cfg.bg.toString(16).padStart(6, '0');
+    roundRect(pad, pad, W, H, r);
+    ctx.fillStyle = hex;
+    ctx.fill();
 
-    // Highlight
-    g.fillStyle(0xffffff, 0.25);
-    g.fillRoundedRect(pad + 2, pad + 2, T - pad * 2 - 4, 10, { tl: r - 1, tr: r - 1, bl: 0, br: 0 });
+    // Top highlight gloss
+    const grad = ctx.createLinearGradient(pad, pad, pad, pad + H * 0.55);
+    grad.addColorStop(0,   'rgba(255,255,255,0.38)');
+    grad.addColorStop(1,   'rgba(255,255,255,0.00)');
+    roundRect(pad + 1, pad + 1, W - 2, H * 0.55, r - 1);
+    ctx.fillStyle = grad;
+    ctx.fill();
 
-    // Border
-    g.lineStyle(2, 0xffffff, 0.7);
-    g.strokeRoundedRect(pad, pad, T - pad * 2, T - pad * 2, r);
+    // White border
+    roundRect(pad, pad, W, H, r);
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
 
-    g.generateTexture(`item_${name}`, T, T);
-    g.destroy();
+    // Icon emoji (upper half)
+    const icon = ITEM_ICONS[name];
+    ctx.font      = '18px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';  // subtle shadow
+    ctx.fillText(icon, T / 2 + 1, T * 0.38 + 1);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(icon, T / 2, T * 0.38);
+
+    // Label text (lower portion)
+    ctx.font         = 'bold 11px monospace';
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle    = 'rgba(0,0,0,0.35)';
+    ctx.fillText(cfg.label, T / 2 + 1, T * 0.72 + 1);
+    ctx.fillStyle = cfg.labelColor;
+    ctx.fillText(cfg.label, T / 2, T * 0.72);
+
+    scene.textures.addCanvas(`item_${name}`, canvas);
   });
 }
 

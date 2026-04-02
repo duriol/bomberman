@@ -68,7 +68,7 @@ export const SPAWN_POSITIONS = [
 ];
 
 // Item drop probabilities (0–1)
-export const ITEM_DROP_CHANCE = 0.35;
+export const ITEM_DROP_CHANCE = 0.5;
 export const ITEM_WEIGHTS = {
   [ITEM.BOMB_UP]:  30,
   [ITEM.FIRE_UP]:  30,

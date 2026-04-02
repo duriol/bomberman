@@ -252,6 +252,39 @@ export class GameScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5, 0).setDepth(51);
+
+    // ℹ info button (right side of HUD)
+    const ibx = GAME_WIDTH - 20;
+    const iby = hudY + HUD_HEIGHT / 2;
+    const iBg = this.add.graphics().setDepth(52);
+    iBg.fillStyle(0x1a3a6a); iBg.fillCircle(ibx, iby, 14);
+    iBg.lineStyle(2, 0x55aaff); iBg.strokeCircle(ibx, iby, 14);
+
+    const iLabel = this.add.text(ibx, iby, 'i', {
+      fontSize: '16px', fontFamily: 'serif', color: '#55aaff',
+      fontStyle: 'italic',
+    }).setOrigin(0.5, 0.5).setDepth(52);
+
+    this._legendPanel   = this._buildInGameLegend();
+    this._legendVisible = false;
+
+    const zone = this.add.zone(ibx, iby, 32, 32).setInteractive({ useHandCursor: true }).setDepth(52);
+    zone.on('pointerdown', () => {
+      this._legendVisible = !this._legendVisible;
+      this._legendPanel.setVisible(this._legendVisible);
+      iBg.clear();
+      if (this._legendVisible) {
+        iBg.fillStyle(0x55aaff); iBg.fillCircle(ibx, iby, 14);
+        iLabel.setStyle({ color: '#001133' });
+      } else {
+        iBg.fillStyle(0x1a3a6a); iBg.fillCircle(ibx, iby, 14);
+        iBg.lineStyle(2, 0x55aaff); iBg.strokeCircle(ibx, iby, 14);
+        iLabel.setStyle({ color: '#55aaff' });
+      }
+    });
+    this.input.keyboard.on('keydown-ESC', () => {
+      if (this._legendVisible) { this._legendVisible = false; this._legendPanel.setVisible(false); }
+    });
   }
 
   _updateHUD() {
@@ -274,6 +307,7 @@ export class GameScene extends Phaser.Scene {
     this._timerText.setText(`${m}:${s.toString().padStart(2, '0')}`);
 
     if (this._roundTime <= 30) this._timerText.setStyle({ color: '#ff4444' });
+    if (this._roundTime === 60 && !this.isOnlineClient) this._startSpiralClose();
     if (this._roundTime <= 0)  this._endRound(null);
   }
 
@@ -337,6 +371,7 @@ export class GameScene extends Phaser.Scene {
     audioManager.stopBGM();
     this._unsubs.forEach(u => u());
     this._unsubs = [];
+    if (this._spiralEvent) { this._spiralEvent.remove(); this._spiralEvent = null; }
     this.inputManager.destroy();
     this.bombManager.destroyAll();
     this.itemManager.destroyAll();

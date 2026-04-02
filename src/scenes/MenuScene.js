@@ -47,6 +47,7 @@ export class MenuScene extends Phaser.Scene {
     this._buildStartButton(cx, height - 110);
     this._buildOnlineButton(cx, height - 60);
     this._buildControlsHint(cx, height - 18);
+    this._buildInfoButton(width, height);
   }
 
   _buildPlayerSelector(cx, y) {
@@ -170,6 +171,165 @@ export class MenuScene extends Phaser.Scene {
       fontFamily: 'monospace',
       color: '#888888',
     }).setOrigin(0.5);
+  }
+
+  _buildInfoButton(width, height) {
+    const DEPTH = 200;
+    const btnSize = 36;
+    const margin  = 12;
+    const bx = width  - margin - btnSize / 2;
+    const by = height - margin - btnSize / 2;
+
+    // ── Info badge ──────────────────────────────────────────────────
+    const btnBg = this.add.graphics().setDepth(DEPTH);
+    btnBg.fillStyle(0x1a3a6a);
+    btnBg.fillCircle(bx, by, btnSize / 2);
+    btnBg.lineStyle(2, 0x55aaff, 1);
+    btnBg.strokeCircle(bx, by, btnSize / 2);
+
+    const btnLabel = this.add.text(bx, by, 'ℹ', {
+      fontSize: '20px',
+      fontFamily: 'serif',
+      color: '#55aaff',
+    }).setOrigin(0.5, 0.5).setDepth(DEPTH);
+
+    // Invisible hit area
+    const hitZone = this.add.zone(bx, by, btnSize + 8, btnSize + 8)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(DEPTH);
+
+    // ── Legend panel (starts hidden) ────────────────────────────────
+    this._legendPanel = this._buildLegendPanel(width, height, DEPTH + 1);
+    this._legendVisible = false;
+
+    const toggleLegend = () => {
+      this._legendVisible = !this._legendVisible;
+      this._legendPanel.setVisible(this._legendVisible);
+      btnBg.clear();
+      if (this._legendVisible) {
+        btnBg.fillStyle(0x55aaff);
+        btnBg.fillCircle(bx, by, btnSize / 2);
+        btnLabel.setStyle({ color: '#001133' });
+      } else {
+        btnBg.fillStyle(0x1a3a6a);
+        btnBg.fillCircle(bx, by, btnSize / 2);
+        btnBg.lineStyle(2, 0x55aaff, 1);
+        btnBg.strokeCircle(bx, by, btnSize / 2);
+        btnLabel.setStyle({ color: '#55aaff' });
+      }
+    };
+
+    hitZone.on('pointerdown', toggleLegend);
+
+    // Close with Escape
+    this.input.keyboard.on('keydown-ESC', () => {
+      if (this._legendVisible) toggleLegend();
+    });
+  }
+
+  _buildLegendPanel(width, height, depth) {
+    const ITEMS = [
+      { icon: '💣', name: 'Bomba extra',    desc: 'Permite colocar\nuna bomba más',    key: 'Automático'      },
+      { icon: '🔥', name: 'Fuego',          desc: 'Aumenta el alcance\nde la explosión', key: 'Automático'      },
+      { icon: '⚡', name: 'Velocidad',      desc: 'Aumenta la\nvelocidad',             key: 'Automático'       },
+      { icon: '📡', name: 'Remoto',         desc: 'Detona la próxima\nbomba a distancia', key: 'E / Shift / U' },
+      { icon: '➡', name: 'Penetración',    desc: 'La explosión\natravesa bloques',    key: 'Automático'      },
+      { icon: '👟', name: 'Patada',         desc: 'Patea bombas al\npasar junto a ellas', key: 'Automático'   },
+      { icon: '💀', name: 'Maldición',      desc: 'Movimiento aleatorio\ndurante 10 seg', key: '— (trampa)'    },
+    ];
+
+    const panelW = Math.min(width - 40, 660);
+    const panelH = 390;
+    const px     = (width  - panelW) / 2;
+    const py     = (height - panelH) / 2;
+
+    const container = this.add.container(0, 0).setDepth(depth).setVisible(false);
+
+    // Dim overlay
+    const dim = this.add.graphics();
+    dim.fillStyle(0x000000, 0.65);
+    dim.fillRect(0, 0, width, height);
+    container.add(dim);
+
+    // Panel background
+    const panel = this.add.graphics();
+    panel.fillStyle(0x0a1a30);
+    panel.fillRoundedRect(px, py, panelW, panelH, 14);
+    panel.lineStyle(2, 0x3366aa);
+    panel.strokeRoundedRect(px, py, panelW, panelH, 14);
+    container.add(panel);
+
+    // Title row
+    const title = this.add.text(width / 2, py + 22, 'Leyenda de Ítems', {
+      fontSize: '18px', fontFamily: 'monospace',
+      color: '#ffdd00', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5, 0);
+    container.add(title);
+
+    const colKeys = ['P1: E', 'P2: Shift', 'P3: O', 'P4: Num+', 'P5: Y'];
+    const actionHint = this.add.text(width / 2, py + 46, '— tecla de acción por jugador: ' + colKeys.join('  ·  '), {
+      fontSize: '9px', fontFamily: 'monospace', color: '#7799bb',
+    }).setOrigin(0.5, 0);
+    container.add(actionHint);
+
+    // Grid: 2 columns
+    const cols    = 2;
+    const cellW   = (panelW - 32) / cols;
+    const cellH   = 68;
+    const gridTop = py + 72;
+
+    ITEMS.forEach((item, idx) => {
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+      const cx  = px + 16 + col * cellW;
+      const cy  = gridTop + row * cellH;
+
+      // Cell bg
+      const cellBg = this.add.graphics();
+      cellBg.fillStyle(0x0f2540, 0.9);
+      cellBg.fillRoundedRect(cx, cy, cellW - 10, cellH - 8, 8);
+      cellBg.lineStyle(1, 0x1e3a5a);
+      cellBg.strokeRoundedRect(cx, cy, cellW - 10, cellH - 8, 8);
+      container.add(cellBg);
+
+      // Emoji icon
+      const iconText = this.add.text(cx + 22, cy + (cellH - 8) / 2, item.icon, {
+        fontSize: '24px', fontFamily: 'serif',
+      }).setOrigin(0.5, 0.5);
+      container.add(iconText);
+
+      // Item name
+      const nameText = this.add.text(cx + 46, cy + 8, item.name, {
+        fontSize: '12px', fontFamily: 'monospace', color: '#ffffaa',
+      });
+      container.add(nameText);
+
+      // Description
+      const descText = this.add.text(cx + 46, cy + 24, item.desc, {
+        fontSize: '9px', fontFamily: 'monospace', color: '#aaccee',
+        lineSpacing: 2,
+      });
+      container.add(descText);
+
+      // Key hint
+      const keyText = this.add.text(cx + cellW - 18, cy + (cellH - 8) / 2, item.key, {
+        fontSize: '8px', fontFamily: 'monospace', color: '#55ff88',
+        backgroundColor: '#0a2010', padding: { x: 4, y: 2 },
+      }).setOrigin(1, 0.5);
+      container.add(keyText);
+    });
+
+    // Close hint
+    const closeHint = this.add.text(width / 2, py + panelH - 20, 'Pulsa ESC o ℹ para cerrar', {
+      fontSize: '10px', fontFamily: 'monospace', color: '#557799',
+    }).setOrigin(0.5, 1);
+    container.add(closeHint);
+
+    // Click outside to close
+    dim.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains)
+      .on('pointerdown', () => { if (this._legendVisible) this._legendPanel.setVisible(false); this._legendVisible = false; });
+
+    return container;
   }
 
   _buildOnlineButton(cx, y) {
