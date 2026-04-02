@@ -455,6 +455,163 @@ export class GameScene extends Phaser.Scene {
     this._updateHUD();
   }
 
+  // ─── In-game legend panel ──────────────────────────────────────────────────
+
+  _buildInGameLegend() {
+    const ITEMS = [
+      { icon: '💣', name: 'Bomba extra',   desc: '+1 bomba activa',        key: 'auto'           },
+      { icon: '🔥', name: 'Fuego',         desc: '+1 alcance explosión',   key: 'auto'           },
+      { icon: '⚡', name: 'Velocidad',     desc: '+velocidad',             key: 'auto'           },
+      { icon: '📡', name: 'Remoto',        desc: 'Detona bombas a dist',   key: 'E/Shift/O/+/Y'  },
+      { icon: '➡', name: 'Penetración',   desc: 'Fuego atraviesa bloques',key: 'auto'           },
+      { icon: '👟', name: 'Patada',        desc: 'Patea bombas al pasar',  key: 'auto'           },
+      { icon: '💀', name: 'Maldición',     desc: 'Move aleatoria 10s',     key: '— (trampa)'     },
+    ];
+
+    const W = 340, H = 310;
+    const px = (GAME_WIDTH  - W) / 2;
+    const py = (CANVAS_HEIGHT - H) / 2 - 20;
+    const DEPTH = 90;
+
+    const cont = this.add.container(0, 0).setDepth(DEPTH).setVisible(false);
+
+    const dim = this.add.graphics();
+    dim.fillStyle(0x000000, 0.6);
+    dim.fillRect(0, 0, GAME_WIDTH, CANVAS_HEIGHT);
+    cont.add(dim);
+
+    const panel = this.add.graphics();
+    panel.fillStyle(0x0a1a30);
+    panel.fillRoundedRect(px, py, W, H, 12);
+    panel.lineStyle(2, 0x3366aa);
+    panel.strokeRoundedRect(px, py, W, H, 12);
+    cont.add(panel);
+
+    cont.add(this.add.text(GAME_WIDTH / 2, py + 14, 'Leyenda de Ítems', {
+      fontSize: '15px', fontFamily: 'monospace',
+      color: '#ffdd00', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5, 0));
+
+    const cellH = 34;
+    const top   = py + 42;
+    ITEMS.forEach((item, idx) => {
+      const cy = top + idx * cellH;
+      const bg = this.add.graphics();
+      bg.fillStyle(idx % 2 === 0 ? 0x0f2540 : 0x0d1e35);
+      bg.fillRect(px + 6, cy, W - 12, cellH - 2);
+      cont.add(bg);
+
+      cont.add(this.add.text(px + 22, cy + cellH / 2, item.icon, {
+        fontSize: '18px', fontFamily: 'serif',
+      }).setOrigin(0.5, 0.5));
+
+      cont.add(this.add.text(px + 40, cy + 5, item.name, {
+        fontSize: '11px', fontFamily: 'monospace', color: '#ffffaa',
+      }));
+      cont.add(this.add.text(px + 40, cy + 18, item.desc, {
+        fontSize: '9px', fontFamily: 'monospace', color: '#aaccee',
+      }));
+      cont.add(this.add.text(px + W - 12, cy + cellH / 2, item.key, {
+        fontSize: '8px', fontFamily: 'monospace', color: '#55ff88',
+        backgroundColor: '#0a2010', padding: { x: 3, y: 2 },
+      }).setOrigin(1, 0.5));
+    });
+
+    cont.add(this.add.text(GAME_WIDTH / 2, py + H - 14, 'Pulsa ESC o ℹ para cerrar', {
+      fontSize: '9px', fontFamily: 'monospace', color: '#557799',
+    }).setOrigin(0.5, 1));
+
+    dim.setInteractive(
+      new Phaser.Geom.Rectangle(0, 0, GAME_WIDTH, CANVAS_HEIGHT),
+      Phaser.Geom.Rectangle.Contains,
+    ).on('pointerdown', () => {
+      this._legendVisible = false;
+      this._legendPanel.setVisible(false);
+    });
+
+    return cont;
+  }
+
+  // ─── Spiral close mechanic ─────────────────────────────────────────────────
+
+  /** Returns {col,row} pairs in outer-to-inner clockwise spiral over the inner playable area. */
+  _generateSpiralOrder() {
+    const tiles = [];
+    let top = 1, bottom = MAP_ROWS - 2, left = 1, right = MAP_COLS - 2;
+    while (top <= bottom && left <= right) {
+      for (let c = left;  c <= right;  c++) tiles.push({ col: c,    row: top    });
+      for (let r = top+1; r <= bottom; r++) tiles.push({ col: right, row: r      });
+      if (top < bottom)
+        for (let c = right-1; c >= left;   c--) tiles.push({ col: c,    row: bottom });
+      if (left < right)
+        for (let r = bottom-1; r >= top+1; r--) tiles.push({ col: left,  row: r      });
+      top++; bottom--; left++; right--;
+    }
+    return tiles;
+  }
+
+  _startSpiralClose() {
+    if (this._spiralEvent) return;
+    this._spiralTiles = this._generateSpiralOrder();
+    this._spiralIndex = 0;
+
+    const warn = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, '¡EL MAPA SE CIERRA!', {
+      fontSize: '28px', fontFamily: 'monospace',
+      color: '#ff4400', stroke: '#000000', strokeThickness: 5,
+    }).setOrigin(0.5).setDepth(95).setAlpha(0);
+    this.tweens.add({
+      targets: warn, alpha: { from: 0, to: 1 },
+      duration: 300, yoyo: true, repeat: 4,
+      onComplete: () => warn.destroy(),
+    });
+
+    this._spiralEvent = this.time.addEvent({
+      delay: 600,
+      callback: this._advanceSpiral,
+      callbackScope: this,
+      loop: true,
+    });
+  }
+
+  _advanceSpiral() {
+    while (this._spiralIndex < this._spiralTiles.length) {
+      const { col, row } = this._spiralTiles[this._spiralIndex++];
+      if (this.map[row][col] === TILE.WALL) continue;
+
+      this.itemManager.destroyAt(col, row);
+
+      for (const player of this.players) {
+        if (!player.alive) continue;
+        const pt = player.tilePos;
+        if (pt.col === col && pt.row === row) {
+          player.die();
+          this._scheduleRespawn(player);
+          if (this.isOnlineHost) this._eventBuffer.push({ t: 'death', pi: player.index });
+        }
+      }
+
+      const flash = this.add.graphics().setDepth(7);
+      flash.fillStyle(0xff2200, 0.85);
+      flash.fillRect(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+      this.tweens.add({
+        targets: flash, alpha: 0, duration: 400,
+        onComplete: () => flash.destroy(),
+      });
+
+      this.time.delayedCall(250, () => {
+        if (this._gameOver) return;
+        this.map[row][col] = TILE.WALL;
+        this._drawTile(col, row);
+        if (this.isOnlineHost && this._lastSentMap) {
+          this._lastSentMap[row][col] = -1;
+        }
+      });
+
+      return;
+    }
+    if (this._spiralEvent) { this._spiralEvent.remove(); this._spiralEvent = null; }
+  }
+
   // ─── Online: State Serialization (host) ───────────────────────────────────
 
   _serializeState() {
