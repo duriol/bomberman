@@ -461,13 +461,13 @@ export class GameScene extends Phaser.Scene {
 
   _buildInGameLegend() {
     const ITEMS = [
-      { icon: '💣', name: 'Bomba extra',   desc: '+1 bomba activa',        key: 'auto'           },
-      { icon: '🔥', name: 'Fuego',         desc: '+1 alcance explosión',   key: 'auto'           },
-      { icon: '⚡', name: 'Velocidad',     desc: '+velocidad',             key: 'auto'           },
-      { icon: '📡', name: 'Remoto',        desc: 'Detona bombas a dist',   key: 'E/Shift/O/+/Y'  },
-      { icon: '➡', name: 'Penetración',   desc: 'Fuego atraviesa bloques',key: 'auto'           },
-      { icon: '👟', name: 'Patada',        desc: 'Patea bombas al pasar',  key: 'auto'           },
-      { icon: '💀', name: 'Maldición',     desc: 'Move aleatoria 10s',     key: '— (trampa)'     },
+      { icon: '💣', name: 'Bomba extra',    desc: '+1 bomba activa (máx 6)',   key: 'auto'          },
+      { icon: '🔥', name: 'Fuego',          desc: '+1 alcance explosión',      key: 'auto'          },
+      { icon: '⚡', name: 'Velocidad',      desc: '+velocidad',                key: 'auto'          },
+      { icon: '💥', name: 'Multi-bomba',    desc: 'Bombas en la dirección que miras', key: 'E/Shift/U/0/Y' },
+      { icon: '👟', name: 'Patada',         desc: 'Patea bombas al pasar',     key: 'auto'          },
+      { icon: '💀', name: 'Maldición',      desc: 'Movimiento aleatorio 10s',  key: '— (trampa)'    },
+      { icon: '🌀', name: 'Enganche',       desc: 'Saldrás disparado hasta la pared', key: '— (trampa)'    },
     ];
 
     const W = 340, H = 310;

@@ -229,13 +229,13 @@ export class MenuScene extends Phaser.Scene {
 
   _buildLegendPanel(width, height, depth) {
     const ITEMS = [
-      { icon: '💣', name: 'Bomba extra',    desc: 'Permite colocar\nuna bomba más',    key: 'Automático'      },
-      { icon: '🔥', name: 'Fuego',          desc: 'Aumenta el alcance\nde la explosión', key: 'Automático'      },
-      { icon: '⚡', name: 'Velocidad',      desc: 'Aumenta la\nvelocidad',             key: 'Automático'       },
-      { icon: '📡', name: 'Remoto',         desc: 'Detona la próxima\nbomba a distancia', key: 'E / Shift / U' },
-      { icon: '➡', name: 'Penetración',    desc: 'La explosión\natravesa bloques',    key: 'Automático'      },
-      { icon: '👟', name: 'Patada',         desc: 'Patea bombas al\npasar junto a ellas', key: 'Automático'   },
-      { icon: '💀', name: 'Maldición',      desc: 'Movimiento aleatorio\ndurante 10 seg', key: '— (trampa)'    },
+      { icon: '💣', name: 'Bomba extra',    desc: 'Permite colocar\nuna bomba más (máx 6)',    key: 'Automático'        },
+      { icon: '🔥', name: 'Fuego',          desc: 'Aumenta el alcance\nde la explosión',       key: 'Automático'        },
+      { icon: '⚡', name: 'Velocidad',      desc: 'Aumenta la\nvelocidad',                    key: 'Automático'        },
+      { icon: '💥', name: 'Multi-bomba',    desc: 'Pone todas tus bombas en la dirección que miras', key: 'E / Shift / U' },
+      { icon: '👟', name: 'Patada',         desc: 'Patea bombas al\npasar junto a ellas',      key: 'Automático'        },
+      { icon: '💀', name: 'Maldición',      desc: 'Movimiento aleatorio\ndurante 10 seg',      key: '— (trampa)'        },
+      { icon: '🌀', name: 'Enganche',       desc: 'Al moverte saldrás\ndisparado hasta la pared', key: '— (trampa)'     },
     ];
 
     const panelW = Math.min(width - 40, 660);

@@ -21,13 +21,13 @@ export const TILE = {
 
 // Item types
 export const ITEM = {
-  BOMB_UP: 'bomb_up',       // +1 bomb capacity
-  FIRE_UP: 'fire_up',       // +1 explosion range
-  SPEED_UP: 'speed_up',     // +movement speed
-  REMOTE: 'remote',         // remote detonation
-  PIERCE: 'pierce',         // fire pierces walls
-  KICK: 'kick',             // kick bombs
-  SKULL: 'skull',           // random curse
+  BOMB_UP:    'bomb_up',     // +1 bomb capacity
+  FIRE_UP:    'fire_up',     // +1 explosion range
+  SPEED_UP:   'speed_up',    // +movement speed
+  MULTI_BOMB: 'multi_bomb',  // place all bombs in facing direction
+  KICK:       'kick',        // kick bombs
+  SKULL:      'skull',       // random curse: random movement
+  RUSH:       'rush',        // curse: locked direction at high speed until wall
 };
 
 // Player colors (Bomberman 4 style)
@@ -45,9 +45,8 @@ export const DEFAULT_PLAYER_STATS = {
   bombRange: 2,
   speed: 160,   // px/s
   lives: 1,
-  remote: false,
-  pierce: false,
   kick: false,
+  multiStar: false,  // multi-bomb in facing direction
 };
 
 // Timing (ms)
@@ -70,11 +69,11 @@ export const SPAWN_POSITIONS = [
 // Item drop probabilities (0–1)
 export const ITEM_DROP_CHANCE = 0.5;
 export const ITEM_WEIGHTS = {
-  [ITEM.BOMB_UP]:  30,
-  [ITEM.FIRE_UP]:  30,
-  [ITEM.SPEED_UP]: 20,
-  [ITEM.KICK]:     10,
-  [ITEM.REMOTE]:   5,
-  [ITEM.PIERCE]:   3,
-  [ITEM.SKULL]:    2,
+  [ITEM.BOMB_UP]:    30,
+  [ITEM.FIRE_UP]:    30,
+  [ITEM.SPEED_UP]:   20,
+  [ITEM.KICK]:       10,
+  [ITEM.MULTI_BOMB]: 6,
+  [ITEM.SKULL]:      2,
+  [ITEM.RUSH]:       2,
 };

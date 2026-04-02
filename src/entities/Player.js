@@ -24,11 +24,13 @@ export class Player {
     // Stats (cloned)
     this.stats = { ...DEFAULT_PLAYER_STATS };
     this.activeBombs  = 0;
-    this.pendingRemote = [];  // bombs waiting for remote detonation
     this._passableBombs = new Set(); // bomb tiles this player can still walk through
     this.alive   = true;
     this.stunned = false;  // skull curse flag
     this.curseTimer = 0;
+    this._isRushing = false;  // rush curse: locked direction until wall
+    this._rushVx    = 0;
+    this._rushVy    = 0;
     this.lives   = this.stats.lives;
     this.respawnInvincible = false;  // true during post-respawn grace period
     this.onEvent = null;  // optional callback for online host event buffering
@@ -108,12 +110,9 @@ export class Player {
 
     if (!input) return;
 
-    // Remote detonation
-    if (input.actionJust && this.stats.remote && this.pendingRemote.length > 0) {
-      const bomb = this.pendingRemote.shift();
-      if (bomb && !bomb.exploded) {
-        bomb.detonate();
-      }
+    // Multi-bomb: place all available bombs in facing direction
+    if (input.actionJust && this.stats.multiStar) {
+      this._tryPlaceMultiBomb();
     }
 
     // Place bomb
@@ -144,11 +143,8 @@ export class Player {
 
     if (!input) return;
 
-    // Remote detonation
-    if (input.actionJust && this.stats.remote && this.pendingRemote.length > 0) {
-      const bomb = this.pendingRemote.shift();
-      if (bomb && !bomb.exploded) bomb.detonate();
-    }
+    // Multi-bomb
+    if (input.actionJust && this.stats.multiStar) this._tryPlaceMultiBomb();
 
     // Place bomb
     if (input.bombJust) this._tryPlaceBomb();
@@ -162,6 +158,33 @@ export class Player {
     const R     = Math.round(TILE_SIZE * 3 / 8);   // 18 px
     const step  = speed * (delta / 1000);
     let vx = 0, vy = 0;
+
+    if (this._isRushing) {
+      // Rush curse: locked direction at 3× speed until hitting a wall
+      const rushStep = this.stats.speed * 3 * (delta / 1000);
+      vx = this._rushVx;
+      vy = this._rushVy;
+      const nx = this.sprite.x + vx * rushStep;
+      const ny = this.sprite.y + vy * rushStep;
+      const canX = this._canMoveCircle(nx, this.sprite.y, R);
+      const canY = this._canMoveCircle(this.sprite.x, ny, R);
+      if ((vx !== 0 && !canX) || (vy !== 0 && !canY)) {
+        // Hit a wall — stop rush
+        this._isRushing = false;
+        this.sprite.clearTint();
+      } else {
+        this.sprite.x = canX ? nx : this.sprite.x;
+        this.sprite.y = canY ? ny : this.sprite.y;
+        this._lastMoveVx = vx;
+        this._lastMoveVy = vy;
+        this.label.setPosition(this.sprite.x, this.sprite.y - TILE_SIZE / 2 - 4);
+        // Walk animation
+        this._walkTimer += delta;
+        if (this._walkTimer > 80) { this._walkTimer = 0; this._walkFrame = (this._walkFrame + 1) % 4; }
+        this.sprite.setTexture(`player_${this.index}_walk_${this._walkFrame}`);
+      }
+      return;
+    }
 
     if (this.stunned) {
       if (this._stunFlipTimer === undefined) this._stunFlipTimer = 0;
@@ -182,6 +205,23 @@ export class Player {
       if (input.left)  vx = -1;
       if (input.right) vx =  1;
       if (vx !== 0 && vy !== 0) { vx *= 0.707; vy *= 0.707; }
+    }
+
+    // Track the last non-zero cardinal direction for multi-bomb and rush
+    if (!this.stunned) {
+      if      (vx >  0.5) this._facing = 'right';
+      else if (vx < -0.5) this._facing = 'left';
+      else if (vy < -0.5) this._facing = 'up';
+      else if (vy >  0.5) this._facing = 'down';
+
+      // Rush curse trigger: lock direction on first input press after picking up rush
+      if ((vx !== 0 || vy !== 0) && this._rushPending) {
+        const ax = Math.abs(vx), ay = Math.abs(vy);
+        this._rushVx = ax >= ay ? Math.sign(vx) : 0;
+        this._rushVy = ax <  ay ? Math.sign(vy) : 0;
+        this._isRushing   = true;
+        this._rushPending = false;
+      }
     }
 
     const prevX = this.sprite.x;
@@ -336,33 +376,51 @@ export class Player {
     const bomb = this.bombManager.placeBomb(col, row, this);
     if (bomb) {
       this.activeBombs++;
-      // Mark this tile as passable so the player can walk away from the bomb
       this._passableBombs.add(`${col},${row}`);
       audioManager.playPlaceBomb();
-      if (this.stats.remote) {
-        this.pendingRemote.push(bomb);
+    }
+  }
+
+  /** Place all remaining bombs in a line starting from tile ahead in facing direction */
+  _tryPlaceMultiBomb() {
+    const facingDelta = { right: [1,0], left: [-1,0], up: [0,-1], down: [0,1] };
+    const [dc, dr] = facingDelta[this._facing] || [0, 1];
+    const { col: startCol, row: startRow } = this.tilePos;
+    let placed = 0;
+    let c = startCol + dc;
+    let r = startRow + dr;
+    while (placed < (this.stats.maxBombs - this.activeBombs) && c >= 0 && c < 15 && r >= 0 && r < 13) {
+      const tile = this.map[r]?.[c];
+      if (tile !== 0 && tile !== 3) break;  // blocked by wall or block
+      if (!this.bombManager.hasBombAt(c, r)) {
+        const bomb = this.bombManager.placeBomb(c, r, this);
+        if (bomb) {
+          this.activeBombs++;
+          audioManager.playPlaceBomb();
+          placed++;
+        }
       }
+      c += dc;
+      r += dr;
     }
   }
 
   onBombExploded(col, row) {
     this.activeBombs = Math.max(0, this.activeBombs - 1);
     this._passableBombs.delete(`${col},${row}`);
-    // Remove from pending remote if present
-    this.pendingRemote = this.pendingRemote.filter(b => !b.exploded);
   }
 
   /** Apply an item to this player */
   applyItem(type) {
     audioManager.playItemPickup();
     switch (type) {
-      case 'bomb_up':  this.stats.maxBombs  = Math.min(8, this.stats.maxBombs + 1); break;
-      case 'fire_up':  this.stats.bombRange = Math.min(8, this.stats.bombRange + 1); break;
-      case 'speed_up': this.stats.speed     = Math.min(280, this.stats.speed + 20);  break;
-      case 'remote':   this.stats.remote    = true;  break;
-      case 'pierce':   this.stats.pierce    = true;  break;
-      case 'kick':     this.stats.kick      = true;  break;
-      case 'skull':    this._applyCurse();           break;
+      case 'bomb_up':   this.stats.maxBombs  = Math.min(6, this.stats.maxBombs + 1); break;
+      case 'fire_up':   this.stats.bombRange = Math.min(8, this.stats.bombRange + 1); break;
+      case 'speed_up':  this.stats.speed     = Math.min(280, this.stats.speed + 20);  break;
+      case 'multi_bomb':this.stats.multiStar = true;  break;
+      case 'kick':      this.stats.kick      = true;  break;
+      case 'skull':     this._applyCurse();           break;
+      case 'rush':      this._applyRush();            break;
     }
     if (this.onEvent) this.onEvent({ t: 'pickup', pi: this.index, it: type });
   }
@@ -373,12 +431,20 @@ export class Player {
     this.curseTimer = 10000;  // 10 seconds
     this._stunFlipTimer = 0;
     this._stunDir = 0;
-    // Visual feedback — flash sprite red
     this.sprite.setTint(0xff0000);
   }
 
+  _applyRush() {
+    audioManager.playSkull();
+    // Rush activates on the NEXT directional input the player makes
+    this._rushPending = true;
+    this.sprite.setTint(0xff6600);
+  }
+
   _clearCurse() {
-    this.stunned = false;
+    this.stunned    = false;
+    this._isRushing = false;
+    this._rushPending = false;
     this.sprite.clearTint();
   }
 
@@ -409,8 +475,9 @@ export class Player {
     this.label.setAlpha(1);
     this.alive  = true;
     this.stunned = false;
+    this._isRushing   = false;
+    this._rushPending = false;
     this.activeBombs = 0;
-    this.pendingRemote = [];
     this.respawnInvincible = true;
     this.scene.time.delayedCall(1500, () => { this.respawnInvincible = false; });
     if (this.onEvent) this.onEvent({ t: 'respawn', pi: this.index, x: pos.x, y: pos.y });

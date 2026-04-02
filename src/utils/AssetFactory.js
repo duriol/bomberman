@@ -243,25 +243,25 @@ function drawExplosionTile(g, type) {
 // ── Items ────────────────────────────────────────────────────────────────────
 
 const ITEM_CONFIGS = {
-  bomb_up:  { bg: 0xdd2222, label: '+1',  labelColor: '#ffffff' },
-  fire_up:  { bg: 0xff6600, label: '+1',  labelColor: '#ffffff' },
-  speed_up: { bg: 0x2288ff, label: '+1',  labelColor: '#ffffff' },
-  remote:   { bg: 0xaa22aa, label: 'RC',  labelColor: '#ffffff' },
-  pierce:   { bg: 0x22aaaa, label: '>>',  labelColor: '#ffffff' },
-  kick:     { bg: 0xaaaa22, label: 'KCK', labelColor: '#111111' },
-  skull:    { bg: 0x555555, label: '☠',   labelColor: '#ff4444' },
+  bomb_up:    { bg: 0xdd2222, label: '+1',  labelColor: '#ffffff' },
+  fire_up:    { bg: 0xff6600, label: '+1',  labelColor: '#ffffff' },
+  speed_up:   { bg: 0x2288ff, label: '+1',  labelColor: '#ffffff' },
+  multi_bomb: { bg: 0xcc8800, label: 'MUL', labelColor: '#ffffff' },
+  kick:       { bg: 0xaaaa22, label: 'KCK', labelColor: '#111111' },
+  skull:      { bg: 0x555555, label: '☠',   labelColor: '#ff4444' },
+  rush:       { bg: 0xdd3300, label: '!!!', labelColor: '#ffff00' },
 };
 
 // Icons drawn via CanvasTexture so we can overlay text glyphs on the coloured badge.
 // Each item has: a coloured rounded square, a small icon on top, and a text label below.
 const ITEM_ICONS = {
-  bomb_up:  '💣',
-  fire_up:  '🔥',
-  speed_up: '⚡',
-  remote:   '📡',
-  pierce:   '➡',
-  kick:     '👟',
-  skull:    '💀',
+  bomb_up:    '💣',
+  fire_up:    '🔥',
+  speed_up:   '⚡',
+  multi_bomb: '💥',
+  kick:       '👟',
+  skull:      '💀',
+  rush:       '🌀',
 };
 
 function generateItems(scene) {
