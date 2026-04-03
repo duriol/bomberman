@@ -21,6 +21,7 @@ class NetworkManager {
     this.playerName  = '';
     this.isHost      = false;
     this.connected   = false;
+    this.lastPlayers = [];
     this._handlers   = {};
   }
 
@@ -71,6 +72,7 @@ class NetworkManager {
       this.roomCode    = roomCode;
       this.playerIndex = playerIndex;
       this.isHost      = true;
+      this.lastPlayers = [{ playerIndex, name: this.playerName || ('Jugador 1') }];
       this._emit('room_created', { roomCode, playerIndex });
     });
 
@@ -82,15 +84,19 @@ class NetworkManager {
     });
 
     s.on('room_error',   msg           => this._emit('room_error', msg));
-    s.on('room_update',  info          => this._emit('room_update', info));
+    s.on('room_update',  info          => {
+      if (info.players) this.lastPlayers = info.players;
+      this._emit('room_update', info);
+    });
     s.on('game_start',   data          => this._emit('game_start', data));
     s.on('game_state',   state         => this._emit('game_state', state));
     s.on('remote_input', data          => this._emit('remote_input', data));
     s.on('player_left',  data          => this._emit('player_left', data));
     s.on('chat_msg',     data          => this._emit('chat_msg', data));
-    s.on('promoted_to_host', ()        => {
-      this.isHost = true;
-      this._emit('promoted_to_host', {});
+    s.on('host_left',    ()            => this._emit('host_left', {}));
+    s.on('return_to_lobby', data       => {
+      if (data.players) this.lastPlayers = data.players;
+      this._emit('return_to_lobby', data);
     });
     s.on('disconnect', () => {
       this.connected = false;
@@ -131,6 +137,11 @@ class NetworkManager {
     this.socket.emit('start_game', { roomCode: this.roomCode, itemConfig });
   }
 
+  returnToLobby() {
+    if (!this.socket || !this.roomCode) return;
+    this.socket.emit('return_to_lobby', { roomCode: this.roomCode });
+  }
+
   /** Host → all other clients (batched at 20hz by GameScene) */
   sendGameState(state) {
     if (!this.socket || !this.roomCode) return;
@@ -155,6 +166,7 @@ class NetworkManager {
     this.playerIndex = -1;
     this.playerName  = '';
     this.isHost      = false;
+    this.lastPlayers = [];
     this._handlers   = {};
   }
 

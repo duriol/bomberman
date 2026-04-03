@@ -164,6 +164,16 @@ export class Player {
     // Place bomb
     if (input.bombJust) this._tryPlaceBomb();
 
+    // Kick: client sends direction + exact tile, host executes on authoritative bomb map
+    if (this.stats.kick && (input.kx || input.ky)) {
+      const col = (input.kc !== undefined) ? input.kc : this.tilePos.col;
+      const row = (input.kr !== undefined) ? input.kr : this.tilePos.row;
+      const bomb = input.kx
+        ? this.bombManager.bombs.get(`${col + input.kx},${row}`) || this.bombManager.bombs.get(`${col},${row}`)
+        : this.bombManager.bombs.get(`${col},${row + input.ky}`) || this.bombManager.bombs.get(`${col},${row}`);
+      if (bomb && !bomb.exploded) bomb.kick(input.kx || 0, input.ky || 0);
+    }
+
     // Keep label synced to sprite (position was set externally)
     this.label.setPosition(this.sprite.x, this.sprite.y - TILE_SIZE / 2 - 4);
   }
@@ -288,16 +298,55 @@ export class Player {
       if (finalX === prevX && vx !== 0) {
         const kdx = Math.sign(vx);
         const { col, row } = this.tilePos;
-        const bomb = this.bombManager.bombs.get(`${col + kdx},${row}`)
+        const kCol = col + kdx;
+        // Search in the 2 tiles ahead (handles position rounding edge cases)
+        const bomb = this.bombManager.bombs.get(`${kCol},${row}`)
+                  || this.bombManager.bombs.get(`${kCol + kdx},${row}`)
                   || this.bombManager.bombs.get(`${col},${row}`);
-        if (bomb && !bomb.exploded) bomb.kick(kdx, 0);
+        if (bomb && !bomb.exploded) {
+          if (this.scene.isOnlineClient) {
+            this._pendingKick = { dx: kdx, dy: 0, col: bomb.col - kdx, row: bomb.row };
+          } else {
+            bomb.kick(kdx, 0);
+          }
+        } else if (this.scene.isOnlineClient) {
+          // Remote bomb: check 2 tiles ahead
+          const remKey1 = `${kCol},${row}`;
+          const remKey2 = `${kCol + kdx},${row}`;
+          const remKey = this.bombManager.remoteBombs.has(remKey1) ? remKey1
+                       : this.bombManager.remoteBombs.has(remKey2) ? remKey2
+                       : null;
+          if (remKey) {
+            const [rc] = remKey.split(',').map(Number);
+            this._pendingKick = { dx: kdx, dy: 0, col: rc - kdx, row };
+          }
+        }
       }
       if (finalY === prevY && vy !== 0) {
         const kdy = Math.sign(vy);
         const { col, row } = this.tilePos;
-        const bomb = this.bombManager.bombs.get(`${col},${row + kdy}`)
+        const kRow = row + kdy;
+        const bomb = this.bombManager.bombs.get(`${col},${kRow}`)
+                  || this.bombManager.bombs.get(`${col},${kRow + kdy}`)
                   || this.bombManager.bombs.get(`${col},${row}`);
-        if (bomb && !bomb.exploded) bomb.kick(0, kdy);
+        if (bomb && !bomb.exploded) {
+          if (this.scene.isOnlineClient) {
+            this._pendingKick = { dx: 0, dy: kdy, col: bomb.col, row: bomb.row - kdy };
+          } else {
+            bomb.kick(0, kdy);
+          }
+        } else if (this.scene.isOnlineClient) {
+          // Remote bomb: check 2 tiles ahead
+          const remKey1 = `${col},${kRow}`;
+          const remKey2 = `${col},${kRow + kdy}`;
+          const remKey = this.bombManager.remoteBombs.has(remKey1) ? remKey1
+                       : this.bombManager.remoteBombs.has(remKey2) ? remKey2
+                       : null;
+          if (remKey) {
+            const [, rr] = remKey.split(',').map(Number);
+            this._pendingKick = { dx: 0, dy: kdy, col, row: rr - kdy };
+          }
+        }
       }
     }
 
@@ -549,8 +598,8 @@ export class Player {
     const targetX = this._netBaseX + this._netVx * this._netSpeed * elapsed;
     const targetY = this._netBaseY + this._netVy * this._netSpeed * elapsed;
 
-    // Exponential lerp — framerate-independent, settles within ~150 ms
-    const alpha = 1 - Math.exp(-20 * delta / 1000);
+    // Exponential lerp — framerate-independent, settles within ~100 ms
+    const alpha = 1 - Math.exp(-30 * delta / 1000);
     this.sprite.x = Phaser.Math.Linear(this.sprite.x, targetX, alpha);
     this.sprite.y = Phaser.Math.Linear(this.sprite.y, targetY, alpha);
 

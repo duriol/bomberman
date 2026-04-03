@@ -21,6 +21,19 @@ export class LobbyScene extends Phaser.Scene {
     this._playerCards = [];
   }
 
+  init(data) {
+    this._returningRoom = (data && data.returning) ? data.roomData : null;
+    // Reset group arrays so create() builds fresh lists each time
+    this._grpConnect = [];
+    this._grpRole    = [];
+    this._grpJoin    = [];
+    this._grpRoom    = [];
+    this._grpHost    = [];
+    this._grpClient  = [];
+    this._playerCards = [];
+    this._unsubs     = [];
+  }
+
   create() {
     const bg = this.add.graphics();
     bg.fillGradientStyle(0x0d001a, 0x0d001a, 0x001a30, 0x001a30, 1);
@@ -172,8 +185,32 @@ export class LobbyScene extends Phaser.Scene {
     this._showGroup(this._grpHost,   false);
     this._showGroup(this._grpClient, false);
 
-    this._setStatus('Introduce la URL del servidor y pulsa CONECTAR');
     this._registerListeners();
+
+    // ── If already connected and in a room (returning from game or ItemConfig) ──
+    if (networkManager.connected && networkManager.roomCode) {
+      this._showGroup(this._grpConnect, false);
+      this._showGroup(this._grpRole,    false);
+      this._showGroup(this._grpRoom,    true);
+      this._roomCodeBig.setText(networkManager.roomCode);
+      if (networkManager.isHost) {
+        this._shareHint.setText('Comparte este c\u00f3digo con tus amigos');
+        this._showGroup(this._grpHost,   true);
+        this._showGroup(this._grpClient, false);
+        const cnt = networkManager.lastPlayers.length;
+        this._btnStart.setAlpha(cnt >= 2 ? 1 : 0.4);
+        this._setStatus('De vuelta en el lobby \u2014 \u00bfJugamos otra vez?', '#88ff88');
+      } else {
+        this._shareHint.setText('');
+        this._showGroup(this._grpHost,   false);
+        this._showGroup(this._grpClient, true);
+        this._setStatus('De vuelta en el lobby. Esperando al anfitri\u00f3n...', '#88ff88');
+      }
+      this._rebuildPlayerCards(networkManager.lastPlayers);
+    } else {
+      this._showGroup(this._grpConnect, true);
+      this._setStatus('Introduce la URL del servidor y pulsa CONECTAR');
+    }
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────
@@ -296,11 +333,6 @@ export class LobbyScene extends Phaser.Scene {
           this._setStatus('Sala ' + roomCode + ' — ' + playerCount + ' jugador(es). Esperando al anfitrión...', '#aaddff');
         }
       }),
-      networkManager.on('promoted_to_host', () => {
-        this._showGroup(this._grpHost,   true);
-        this._showGroup(this._grpClient, false);
-        this._setStatus('¡Ahora eres el anfitrión!', '#ffdd00');
-      }),
       networkManager.on('player_left', ({ playerIndex }) => {
         this._setStatus('P' + (playerIndex + 1) + ' abandonó la sala', '#ffaa88');
       }),
@@ -313,6 +345,25 @@ export class LobbyScene extends Phaser.Scene {
           roomCode: networkManager.roomCode,
           seed, playerNames, itemConfig,
         });
+      }),
+      networkManager.on('return_to_lobby', ({ players, playerCount, roomCode }) => {
+        // Could arrive if another tab / reconnect triggers it while already in lobby
+        this._showGroup(this._grpRoom, true);
+        if (networkManager.isHost) {
+          this._showGroup(this._grpHost, true);
+          this._showGroup(this._grpClient, false);
+        } else {
+          this._showGroup(this._grpHost, false);
+          this._showGroup(this._grpClient, true);
+        }
+        this._roomCodeBig.setText(roomCode || networkManager.roomCode);
+        this._rebuildPlayerCards(players || []);
+        this._setStatus('De vuelta en el lobby.', '#88ff88');
+      }),
+      networkManager.on('host_left', () => {
+        networkManager.disconnect();
+        this._cleanup();
+        this.scene.start('MenuScene');
       }),
       networkManager.on('disconnected', () => {
         this._setStatus('Desconectado del servidor', '#ff6666');

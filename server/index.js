@@ -9,6 +9,7 @@
  *   create_room                    → room_created | room_error
  *   join_room   { roomCode }       → room_joined  | room_error
  *   start_game  { roomCode }       → game_start broadcast (host only)
+ *   return_to_lobby { roomCode }   → return_to_lobby broadcast (host only)
  *   player_input { roomCode, inputs }  → remote_input forwarded to host
  *   game_state  { roomCode, state }   → game_state broadcast to non-host players
  *   chat_msg    { roomCode, text }    → chat_msg broadcast
@@ -19,10 +20,11 @@
  *   room_error     string
  *   room_update    { roomCode, players:[{playerIndex}], started }
  *   game_start     { playerCount, seed }     (broadcast)
+ *   return_to_lobby { roomCode, players, playerCount } (broadcast)
  *   remote_input   { playerIndex, inputs }   (host only)
  *   game_state     state                     (non-host)
  *   player_left    { playerIndex }           (broadcast)
- *   promoted_to_host {}                      (new host, if previous left)
+ *   host_left      {}                        (broadcast when host disconnects)
  *   chat_msg       { playerIndex, text }     (broadcast)
  */
 
@@ -75,6 +77,7 @@ function leaveRoom(socket) {
   const r = findRoomOf(socket.id);
   if (!r) return;
   const { code, room } = r;
+  const wasHost = room.host === socket.id;
   room.players = room.players.filter(p => p.socketId !== socket.id);
   socket.leave(code);
 
@@ -83,9 +86,15 @@ function leaveRoom(socket) {
     return;
   }
 
-  if (room.host === socket.id) {
-    room.host = room.players[0].socketId;
-    io.to(room.host).emit('promoted_to_host', {});
+  if (wasHost) {
+    // Host left — kick all remaining players and destroy room
+    io.to(code).emit('host_left', {});
+    for (const p of room.players) {
+      const s = io.sockets.sockets.get(p.socketId);
+      if (s) s.leave(code);
+    }
+    rooms.delete(code);
+    return;
   }
 
   io.to(code).emit('room_update', roomInfo(code));
@@ -182,6 +191,14 @@ io.on('connection', (socket) => {
     const player = room.players.find(p => p.socketId === socket.id);
     if (!player) return;
     io.to(room.host).emit('remote_input', { playerIndex: player.playerIndex, inputs });
+  });
+
+  // ── Return to lobby (host only) ──────────────────────────────────────────
+  socket.on('return_to_lobby', ({ roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room || room.host !== socket.id) return;
+    room.started = false;
+    io.to(roomCode).emit('return_to_lobby', roomInfo(roomCode));
   });
 
   // ── Chat ───────────────────────────────────────────────────────────────────

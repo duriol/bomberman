@@ -94,7 +94,9 @@ class Bomb {
       return;
     }
     this._sliding = true;
-    this.manager.bombs.delete(`${this.col},${this.row}`);
+    const prevKey = `${this.col},${this.row}`;
+    this.manager.bombs.delete(prevKey);
+    this.manager._vacatedKeys.add(prevKey);
     this.col = newCol;
     this.row = newRow;
     this.manager.bombs.set(`${this.col},${this.row}`, this);
@@ -119,11 +121,16 @@ export class BombManager {
     this.onExplosionHit   = onExplosionHit;
     this.onExplosionEvent = null; // set by GameScene in online host mode
 
-    this.bombs      = new Map();
-    this.explosions = new Set();
+    this.bombs        = new Map();
+    this.explosions   = new Set();
+    this._vacatedKeys = new Set(); // positions recently vacated by sliding bombs (used by client reconcile)
+    this.remoteBombs  = new Set(); // positions of remote (non-owned) bombs, maintained by client reconcile
   }
 
-  hasBombAt(col, row) { return this.bombs.has(`${col},${row}`); }
+  hasBombAt(col, row) {
+    const key = `${col},${row}`;
+    return this.bombs.has(key) || this.remoteBombs.has(key);
+  }
 
   placeBomb(col, row, owner) {
     if (this.hasBombAt(col, row)) return null;
@@ -168,7 +175,7 @@ export class BombManager {
     }
 
     if (this.onExplosionEvent) {
-      this.onExplosionEvent({ col: originCol, row: originRow, range, pierce });
+      this.onExplosionEvent({ col: originCol, row: originRow, range, pierce, tiles });
     }
   }
 

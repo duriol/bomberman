@@ -19,14 +19,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   init(data) {
-    this.playerCount    = data.playerCount    || 2;
-    this.onlineMode     = data.online         || false;
-    this.isOnlineHost   = data.isHost         || false;
-    this.isOnlineClient = this.onlineMode && !this.isOnlineHost;
-    this.myPlayerIndex  = data.myPlayerIndex  ?? 0;
-    this._seed          = data.seed           ?? null;
-    this._itemConfig    = data.itemConfig     ?? null;
-    this._unsubs        = [];
+    this.playerCount      = data.playerCount    || 2;
+    this.onlineMode       = data.online         || false;
+    this.isOnlineHost     = data.isHost         || false;
+    this.isOnlineClient   = this.onlineMode && !this.isOnlineHost;
+    this.myPlayerIndex    = data.myPlayerIndex  ?? 0;
+    this._seed            = data.seed           ?? null;
+    this._itemConfig      = data.itemConfig     ?? null;
+    this._unsubs          = [];
+    this._goingToLobby    = false;
+    this._pendingLobbyData = null;
   }
 
   preload() {
@@ -132,7 +134,21 @@ export class GameScene extends Phaser.Scene {
     if (this.isOnlineHost) {
       this._unsubs.push(
         networkManager.on('remote_input', ({ playerIndex, inputs }) => {
-          this._remoteInputs[playerIndex] = inputs;
+          const prev = this._remoteInputs[playerIndex] || {};
+          const hasKickNow = !!(inputs.kx || inputs.ky);
+          const hadKickLatched = !!(prev.kx || prev.ky);
+          // Latch one-shot flags: keep true until the host update loop consumes them
+          this._remoteInputs[playerIndex] = {
+            ...inputs,
+            bombJust:   inputs.bombJust   || !!prev.bombJust,
+            actionJust: inputs.actionJust || !!prev.actionJust,
+            kx:         inputs.kx || prev.kx || 0,
+            ky:         inputs.ky || prev.ky || 0,
+            // Preserve both tile coordinates while a kick is latched.
+            // Horizontal kicks still need row, vertical kicks still need col.
+            kc:         hasKickNow ? inputs.kc : (hadKickLatched ? prev.kc : undefined),
+            kr:         hasKickNow ? inputs.kr : (hadKickLatched ? prev.kr : undefined),
+          };
         }),
       );
     } else if (this.isOnlineClient) {
@@ -140,6 +156,23 @@ export class GameScene extends Phaser.Scene {
         networkManager.on('game_state', (state) => {
           // Keep only most recent state
           this._pendingState = state;
+        }),
+      );
+    }
+
+    if (this.onlineMode) {
+      this._unsubs.push(
+        networkManager.on('host_left', () => {
+          if (this._gameOver) return; // already handled in _endRound
+          this._cleanupSystems();
+          networkManager.disconnect();
+          this.scene.start('MenuScene');
+        }),
+        networkManager.on('return_to_lobby', (data) => {
+          // Store data; actual transition happens in update() inside Phaser loop
+          if (!this.isOnlineHost) {
+            this._pendingLobbyData = data;
+          }
         }),
       );
     }
@@ -361,29 +394,81 @@ export class GameScene extends Phaser.Scene {
       color, stroke: '#000000', strokeThickness: 6,
     }).setOrigin(0.5).setDepth(101);
 
-    this.add.text(GAME_WIDTH / 2, CANVAS_HEIGHT / 2 + 30, 'Pulsa ENTER o click para continuar', {
-      fontSize: '18px', fontFamily: 'monospace', color: '#ffffff',
-    }).setOrigin(0.5).setDepth(101);
+    if (this.onlineMode) {
+      this.add.text(GAME_WIDTH / 2, CANVAS_HEIGHT / 2 + 30, 'Pulsa ENTER o click para volver al lobby', {
+        fontSize: '18px', fontFamily: 'monospace', color: '#ffffff',
+      }).setOrigin(0.5).setDepth(101);
 
-    this.input.once('pointerdown',        () => this._goToMenu());
-    this.input.keyboard.once('keydown-ENTER', () => this._goToMenu());
-    this.input.keyboard.once('keydown-SPACE', () => this._goToMenu());
+      let done = false;
+      const doReturn = () => {
+        if (done) return; done = true;
+        window.removeEventListener('keydown', onKey);
+        if (this.isOnlineHost) {
+          // Host notifies server (resets room.started + broadcasts to clients)
+          networkManager.returnToLobby();
+        }
+        this._goToLobby({
+          roomCode:    networkManager.roomCode,
+          players:     networkManager.lastPlayers,
+          playerCount: networkManager.lastPlayers.length,
+          started:     false,
+        });
+      };
+      const onKey = (e) => { if (e.key === 'Enter' || e.key === ' ') doReturn(); };
+      window.addEventListener('keydown', onKey);
+      this.input.once('pointerdown', () => {
+        window.removeEventListener('keydown', onKey);
+        doReturn();
+      });
+      this._unsubs.push(() => window.removeEventListener('keydown', onKey));
+    } else {
+      this.add.text(GAME_WIDTH / 2, CANVAS_HEIGHT / 2 + 30, 'Pulsa ENTER o click para continuar', {
+        fontSize: '18px', fontFamily: 'monospace', color: '#ffffff',
+      }).setOrigin(0.5).setDepth(101);
+
+      let done = false;
+      const goMenu = () => { if (done) return; done = true; window.removeEventListener('keydown', onLocalKey); this._goToMenu(); };
+      const onLocalKey = (e) => { if (e.key === 'Enter' || e.key === ' ') goMenu(); };
+      window.addEventListener('keydown', onLocalKey);
+      this.input.once('pointerdown', goMenu);
+      this._unsubs.push(() => window.removeEventListener('keydown', onLocalKey));
+    }
   }
 
   _goToMenu() {
     audioManager.stopBGM();
+    this._cleanupSystems();
+    this.scene.start('MenuScene');
+  }
+
+  _goToLobby(roomData) {
+    if (this._goingToLobby) return;
+    this._goingToLobby = true;
+    audioManager.stopBGM();
+    this._cleanupSystems();
+    this.scene.start('LobbyScene', { returning: true, roomData });
+  }
+
+  _cleanupSystems() {
     this._unsubs.forEach(u => u());
     this._unsubs = [];
     if (this._spiralEvent) { this._spiralEvent.remove(); this._spiralEvent = null; }
     this.inputManager.destroy();
     this.bombManager.destroyAll();
     this.itemManager.destroyAll();
-    this.scene.start(this.onlineMode ? 'LobbyScene' : 'MenuScene');
   }
 
   // ─── Update Loop ───────────────────────────────────────────────────────────
 
   update(time, delta) {
+    // Handle lobby return even after game over (transition must run inside Phaser loop)
+    if (this._pendingLobbyData) {
+      const d = this._pendingLobbyData;
+      this._pendingLobbyData = null;
+      this._goToLobby(d);
+      return;
+    }
+
     if (this._gameOver) return;
 
     if (this.isOnlineClient) {
@@ -394,6 +479,8 @@ export class GameScene extends Phaser.Scene {
 
       // Send inputs + authoritative client position to host
       const myPlayer = this.players[this.myPlayerIndex];
+      const pendingKick = myPlayer ? myPlayer._pendingKick : null;
+      if (myPlayer) myPlayer._pendingKick = null;
       networkManager.sendInput({
         up:          myInput.up,
         down:        myInput.down,
@@ -401,6 +488,11 @@ export class GameScene extends Phaser.Scene {
         right:       myInput.right,
         bombJust:    myInput.bombJust,
         actionJust:  myInput.actionJust,
+        fac:         myPlayer ? myPlayer._facing : 'down',
+        kx:          pendingKick ? pendingKick.dx  : 0,
+        ky:          pendingKick ? pendingKick.dy  : 0,
+        kc:          pendingKick ? pendingKick.col : 0,
+        kr:          pendingKick ? pendingKick.row : 0,
         x:  myPlayer ? Math.round(myPlayer.x) : 0,
         y:  myPlayer ? Math.round(myPlayer.y) : 0,
         fr: myPlayer ? (myPlayer._walkFrame || 0) : 0,
@@ -429,11 +521,24 @@ export class GameScene extends Phaser.Scene {
             this.players[i].update(delta, input);
           } else {
             // Client-authoritative: use position reported by the client
-            input = this._remoteInputs[i];
+            // Copy input so we can clear the latched flags in storage BEFORE processing,
+            // preventing bombJust/actionJust from firing again on the next host frame.
+            const stored = this._remoteInputs[i];
+            input = stored ? { ...stored } : null;
+            if (stored) {
+              stored.bombJust = false;
+              stored.actionJust = false;
+              stored.kx = 0;
+              stored.ky = 0;
+              stored.kc = undefined;
+              stored.kr = undefined;
+            }
             if (input && input.x !== undefined) {
               this.players[i].sprite.setPosition(input.x, input.y);
               this.players[i]._walkFrame = input.fr || 0;
             }
+            // Apply facing so multi-bomb fires in the correct direction
+            if (input && input.fac) this.players[i]._facing = input.fac;
             this.players[i].updateActionsOnly(delta, input || _emptyInput());
           }
         } else {
@@ -445,10 +550,10 @@ export class GameScene extends Phaser.Scene {
       this.itemManager.checkPickups(this.players);
       this._checkRoundEnd();
 
-      // Broadcast state if online host (30 hz)
+      // Broadcast state if online host (60 hz)
       if (this.isOnlineHost) {
         this._netAccum += delta;
-        if (this._netAccum >= 33) {
+        if (this._netAccum >= 16) {
           this._netAccum = 0;
           networkManager.sendGameState(this._serializeState());
         }
@@ -659,6 +764,10 @@ export class GameScene extends Phaser.Scene {
         br:  p.stats.bombRange,
         sp:  p.stats.speed,
         st:  p.stunned,
+        ra:  p._rushActive   || false,
+        rp:  p._rushPending  || false,
+        ki:  p.stats.kick    || false,
+        ms:  p.stats.multiStar || false,
         fr:  p._walkFrame || 0,
       })),
       bm:  this.bombManager.serialize(),
@@ -689,8 +798,9 @@ export class GameScene extends Phaser.Scene {
     if (state.ev) {
       for (const ev of state.ev) {
         if (ev.t === 'explode') {
-          // Compute tiles from updated map and spawn visuals
-          const tiles = calcExplosionTiles(this.map, ev.col, ev.row, ev.range, ev.pierce);
+          // Use pre-computed tiles from host so block removal from md (step 1) doesn't
+          // cause the explosion to incorrectly travel through where blocks were.
+          const tiles = ev.tiles || calcExplosionTiles(this.map, ev.col, ev.row, ev.range, ev.pierce);
           for (const { col, row, type } of tiles) {
             this._spawnExplosionVisual(col, row, type);
           }
@@ -762,18 +872,52 @@ export class GameScene extends Phaser.Scene {
           // No position reconciliation — client position is never overridden
         }
 
+        const prevStunned   = p.stunned;
+        const prevRushActive = p._rushActive;
+
         p.alive           = ps.al;
         p.lives           = ps.lv;
         p.stats.maxBombs  = ps.mb;
         p.stats.bombRange = ps.br;
         p.stats.speed     = ps.sp;
         p.stunned         = ps.st;
+        p._rushActive     = ps.ra || false;
+        p._rushPending    = ps.rp || false;
+        p.stats.kick      = ps.ki || false;
+        p.stats.multiStar = ps.ms || false;
+
+        // Reinit curse timers when host flips them on — without this the client
+        // update() loop would see curseTimer=0 and immediately call _clearCurse().
+        if (ps.st && !prevStunned)    p.curseTimer = 10000;
+        if (ps.ra && !prevRushActive) p._rushTimer  = 5000;
+
+        // Apply or clear visual tint for curse effects
+        if (ps.st) {
+          p.sprite.setTint(0xff0000);
+        } else if (ps.ra) {
+          p.sprite.setTint(0xff6600);
+        } else if (ps.al) {
+          p.sprite.clearTint();
+        }
       });
     }
 
     // 4. Reconcile bomb sprites (no timer logic — just visual presence)
     if (state.bm) {
       const newSet = new Set(state.bm.map(b => `${b.col},${b.row}`));
+
+      // Own bombs whose position is no longer in host state have been moved or exploded.
+      // Destroy them so their sprite is removed and normal reconcile can create a fresh
+      // sprite at the host-authoritative position.
+      for (const [key, bomb] of this.bombManager.bombs) {
+        if (!newSet.has(key)) {
+          bomb.destroy();
+          this.bombManager.bombs.delete(key);
+          // If this player owns it, fix the active-bomb counter
+          const owner = this.players[this.myPlayerIndex];
+          if (owner) owner.activeBombs = Math.max(0, owner.activeBombs - 1);
+        }
+      }
 
       for (const [key, spr] of this._clientBombSprites) {
         if (!newSet.has(key)) {
@@ -782,8 +926,17 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
+      // Update remote bomb positions for client-side collision
+      this.bombManager.remoteBombs.clear();
       for (const { col, row } of state.bm) {
         const key = `${col},${row}`;
+        if (!this.bombManager.bombs.has(key)) this.bombManager.remoteBombs.add(key);
+      }
+
+      for (const { col, row } of state.bm) {
+        const key = `${col},${row}`;
+        // Own bomb still at this exact position — its sprite is already rendered
+        if (this.bombManager.bombs.has(key)) continue;
         if (!this._clientBombSprites.has(key)) {
           const pos = tileToPixel(col, row, TILE_SIZE);
           const spr = this.add.sprite(pos.x, pos.y, 'bomb').setDepth(5);
