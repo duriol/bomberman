@@ -134,7 +134,7 @@ io.on('connection', (socket) => {
   });
 
   // ── Start game (host only) ─────────────────────────────────────────────────
-  socket.on('start_game', ({ roomCode }) => {
+  socket.on('start_game', ({ roomCode, itemConfig }) => {
     const room = rooms.get(roomCode);
     if (!room || room.host !== socket.id) return;
     if (room.players.length < 2) { socket.emit('room_error', 'Se necesitan al menos 2 jugadores'); return; }
@@ -143,10 +143,30 @@ io.on('connection', (socket) => {
     const seed = (Math.random() * 0xFFFFFFFF) >>> 0;
     const playerNames = room.players.map(p => p.name || ('Jugador ' + (p.playerIndex + 1)));
 
+    // Sanitise itemConfig: values must be non-negative integers, total capped at 30
+    const safeConfig = {};
+    let configTotal = 0;
+    if (itemConfig && typeof itemConfig === 'object') {
+      const ALLOWED = ['bomb_up', 'fire_up', 'speed_up', 'multi_bomb', 'kick', 'skull', 'rush'];
+      for (const key of ALLOWED) {
+        const v = Math.max(0, Math.min(30, Math.floor(Number(itemConfig[key]) || 0)));
+        safeConfig[key] = v;
+        configTotal += v;
+      }
+      // Enforce total cap
+      if (configTotal > 30) {
+        const scale = 30 / configTotal;
+        for (const key of Object.keys(safeConfig)) {
+          safeConfig[key] = Math.floor(safeConfig[key] * scale);
+        }
+      }
+    }
+
     io.to(roomCode).emit('game_start', {
       playerCount: room.players.length,
       seed,
       playerNames,
+      itemConfig: safeConfig,
     });
   });
 

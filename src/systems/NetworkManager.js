@@ -126,9 +126,9 @@ class NetworkManager {
     this.socket.emit('join_room', { roomCode: code, name });
   }
 
-  startGame() {
+  startGame(itemConfig = {}) {
     this._require();
-    this.socket.emit('start_game', { roomCode: this.roomCode });
+    this.socket.emit('start_game', { roomCode: this.roomCode, itemConfig });
   }
 
   /** Host → all other clients (batched at 20hz by GameScene) */

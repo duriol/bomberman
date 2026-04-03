@@ -322,14 +322,30 @@ function generateItems(scene) {
     ctx.stroke();
 
     // Icon emoji (upper half)
-    const icon = ITEM_ICONS[name];
-    ctx.font      = '18px serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';  // subtle shadow
-    ctx.fillText(icon, T / 2 + 1, T * 0.38 + 1);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(icon, T / 2, T * 0.38);
+    if (name === 'multi_bomb') {
+      // Three bombs in a horizontal line
+      ctx.font = '11px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const iconY = T * 0.38;
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillText('\uD83D\uDCA3', T / 2 - 12 + 1, iconY + 1);
+      ctx.fillText('\uD83D\uDCA3', T / 2       + 1, iconY + 1);
+      ctx.fillText('\uD83D\uDCA3', T / 2 + 12 + 1, iconY + 1);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('\uD83D\uDCA3', T / 2 - 12, iconY);
+      ctx.fillText('\uD83D\uDCA3', T / 2,      iconY);
+      ctx.fillText('\uD83D\uDCA3', T / 2 + 12, iconY);
+    } else {
+      const icon = ITEM_ICONS[name];
+      ctx.font      = '18px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';  // subtle shadow
+      ctx.fillText(icon, T / 2 + 1, T * 0.38 + 1);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(icon, T / 2, T * 0.38);
+    }
 
     // Label text (lower portion)
     ctx.font         = 'bold 11px monospace';

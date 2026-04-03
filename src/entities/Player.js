@@ -28,9 +28,12 @@ export class Player {
     this.alive   = true;
     this.stunned = false;  // skull curse flag
     this.curseTimer = 0;
-    this._isRushing = false;  // rush curse: locked direction until wall
+    this._isRushing   = false;  // rush curse: actively charging at 3x speed
+    this._rushActive  = false;  // rush curse: true for full 5s duration
+    this._rushTimer   = 0;      // rush countdown ms
     this._rushVx    = 0;
     this._rushVy    = 0;
+    this._curseClearCallback = null; // called by _clearCurse (bounty item respawn)
     this.lives   = this.stats.lives;
     this.respawnInvincible = false;  // true during post-respawn grace period
     this.onEvent = null;  // optional callback for online host event buffering
@@ -108,6 +111,12 @@ export class Player {
       if (this.curseTimer <= 0) this._clearCurse();
     }
 
+    // Rush curse tick
+    if (this._rushActive) {
+      this._rushTimer -= delta;
+      if (this._rushTimer <= 0) this._clearCurse();
+    }
+
     if (!input) return;
 
     // Multi-bomb: place all available bombs in facing direction
@@ -141,6 +150,12 @@ export class Player {
       if (this.curseTimer <= 0) this._clearCurse();
     }
 
+    // Rush curse tick
+    if (this._rushActive) {
+      this._rushTimer -= delta;
+      if (this._rushTimer <= 0) this._clearCurse();
+    }
+
     if (!input) return;
 
     // Multi-bomb
@@ -169,9 +184,9 @@ export class Player {
       const canX = this._canMoveCircle(nx, this.sprite.y, R);
       const canY = this._canMoveCircle(this.sprite.x, ny, R);
       if ((vx !== 0 && !canX) || (vy !== 0 && !canY)) {
-        // Hit a wall — stop rush
+        // Hit a wall — stop this dash; if rush still active, re-arm for next input
         this._isRushing = false;
-        this.sprite.clearTint();
+        if (this._rushActive) this._rushPending = true;
       } else {
         this.sprite.x = canX ? nx : this.sprite.x;
         this.sprite.y = canY ? ny : this.sprite.y;
@@ -386,10 +401,11 @@ export class Player {
     const facingDelta = { right: [1,0], left: [-1,0], up: [0,-1], down: [0,1] };
     const [dc, dr] = facingDelta[this._facing] || [0, 1];
     const { col: startCol, row: startRow } = this.tilePos;
+    const limit = this.stats.maxBombs - this.activeBombs;  // capture before loop: activeBombs++ would otherwise shrink this each iteration
     let placed = 0;
     let c = startCol + dc;
     let r = startRow + dr;
-    while (placed < (this.stats.maxBombs - this.activeBombs) && c >= 0 && c < 15 && r >= 0 && r < 13) {
+    while (placed < limit && c >= 0 && c < 15 && r >= 0 && r < 13) {
       const tile = this.map[r]?.[c];
       if (tile !== 0 && tile !== 3) break;  // blocked by wall or block
       if (!this.bombManager.hasBombAt(c, r)) {
@@ -436,22 +452,32 @@ export class Player {
 
   _applyRush() {
     audioManager.playSkull();
-    // Rush activates on the NEXT directional input the player makes
+    this._rushActive  = true;
     this._rushPending = true;
+    this._rushTimer   = 5000;  // 5 seconds, ticked down in update()
     this.sprite.setTint(0xff6600);
   }
 
   _clearCurse() {
-    this.stunned    = false;
-    this._isRushing = false;
+    this.stunned      = false;
+    this._isRushing   = false;
+    this._rushActive  = false;
     this._rushPending = false;
+    this._rushTimer   = 0;
     this.sprite.clearTint();
+    if (this._curseClearCallback) {
+      const cb = this._curseClearCallback;
+      this._curseClearCallback = null;
+      cb();
+    }
   }
 
   /** Called when this player gets hit by an explosion */
   die() {
     if (!this.alive) return;
     if (this.respawnInvincible) return;  // grace period after respawn
+    // Trigger bounty item respawn callback if curse was active
+    if (this.stunned || this._isRushing || this._rushPending) this._clearCurse();
     audioManager.playPlayerDeath();
     this.alive = false;
     this.sprite.setTexture(`player_${this.index}_dead`);
@@ -474,9 +500,7 @@ export class Player {
     this.sprite.clearTint();
     this.label.setAlpha(1);
     this.alive  = true;
-    this.stunned = false;
-    this._isRushing   = false;
-    this._rushPending = false;
+    this._clearCurse();  // clears stunned/_isRushing/_rushPending and fires any pending callback
     this.activeBombs = 0;
     this.respawnInvincible = true;
     this.scene.time.delayedCall(1500, () => { this.respawnInvincible = false; });

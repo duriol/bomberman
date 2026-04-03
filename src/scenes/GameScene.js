@@ -25,6 +25,7 @@ export class GameScene extends Phaser.Scene {
     this.isOnlineClient = this.onlineMode && !this.isOnlineHost;
     this.myPlayerIndex  = data.myPlayerIndex  ?? 0;
     this._seed          = data.seed           ?? null;
+    this._itemConfig    = data.itemConfig     ?? null;
     this._unsubs        = [];
   }
 
@@ -60,7 +61,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ── Systems ──────────────────────────────────────────────────────────────
-    this.itemManager = new ItemManager(this);
+    this.itemManager = new ItemManager(this, this._itemConfig);
 
     this.bombManager = new BombManager(
       this,

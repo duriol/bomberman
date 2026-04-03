@@ -143,8 +143,11 @@ export class LobbyScene extends Phaser.Scene {
     this._grpRoom.push(lblPlayers);
 
     // ── Section: Action ────────────────────────────────────────────────
-    this._btnStart = this._makeBtn(CX, H - 78, '▶  INICIAR PARTIDA', '#776600');
-    this._btnStart.on('pointerdown', () => networkManager.startGame());
+    this._btnStart = this._makeBtn(CX, H - 78, '▶  CONFIGURAR ITEMS', '#2a4a88');
+    this._btnStart.on('pointerdown', () => {
+      this._cleanup();
+      this.scene.start('ItemConfigScene');
+    });
     this._grpHost.push(this._btnStart);
 
     this._waitMsg = this.add.text(CX, H - 78, 'Esperando al anfitrión para comenzar...', {
@@ -301,13 +304,14 @@ export class LobbyScene extends Phaser.Scene {
       networkManager.on('player_left', ({ playerIndex }) => {
         this._setStatus('P' + (playerIndex + 1) + ' abandonó la sala', '#ffaa88');
       }),
-      networkManager.on('game_start', ({ playerCount, seed }) => {
+      networkManager.on('game_start', ({ playerCount, seed, playerNames, itemConfig }) => {
         this._cleanup();
         this.scene.start('GameScene', {
           playerCount, online: true,
           isHost: networkManager.isHost,
           myPlayerIndex: networkManager.playerIndex,
-          roomCode: networkManager.roomCode, seed,
+          roomCode: networkManager.roomCode,
+          seed, playerNames, itemConfig,
         });
       }),
       networkManager.on('disconnected', () => {

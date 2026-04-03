@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { MenuScene } from './scenes/MenuScene.js';
 import { GameScene } from './scenes/GameScene.js';
 import { LobbyScene } from './scenes/LobbyScene.js';
+import { ItemConfigScene } from './scenes/ItemConfigScene.js';
 import { GAME_WIDTH, CANVAS_HEIGHT } from './data/constants.js';
 
 const config = {
@@ -16,7 +17,7 @@ const config = {
       debug: false,
     },
   },
-  scene: [MenuScene, LobbyScene, GameScene],
+  scene: [MenuScene, LobbyScene, ItemConfigScene, GameScene],
   parent: 'game-canvas',
   scale: {
     mode: Phaser.Scale.FIT,
