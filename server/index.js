@@ -10,6 +10,7 @@
  *   join_room   { roomCode }       → room_joined  | room_error
  *   start_game  { roomCode }       → game_start broadcast (host only)
  *   return_to_lobby { roomCode }   → return_to_lobby broadcast (host only)
+ *   update_name { roomCode, name }  → room_update broadcast
  *   player_input { roomCode, inputs }  → remote_input forwarded to host
  *   game_state  { roomCode, state }   → game_state broadcast to non-host players
  *   chat_msg    { roomCode, text }    → chat_msg broadcast
@@ -199,6 +200,24 @@ io.on('connection', (socket) => {
     if (!room || room.host !== socket.id) return;
     room.started = false;
     io.to(roomCode).emit('return_to_lobby', roomInfo(roomCode));
+  });
+
+  // ── Update display name ────────────────────────────────────────────────
+  socket.on('update_name', ({ roomCode, name } = {}) => {
+    let code = String(roomCode || '').toUpperCase().trim();
+    let room = code ? rooms.get(code) : null;
+    if (!room) {
+      const found = findRoomOf(socket.id);
+      if (!found) return;
+      code = found.code;
+      room = found.room;
+    }
+    const player = room.players.find(p => p.socketId === socket.id);
+    if (!player) return;
+    const safeName = String(name || '').trim().slice(0, 12);
+    if (!safeName) return;
+    player.name = safeName;
+    io.to(code).emit('room_update', roomInfo(code));
   });
 
   // ── Chat ───────────────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@ export class GameScene extends Phaser.Scene {
     this.myPlayerIndex    = data.myPlayerIndex  ?? 0;
     this._seed            = data.seed           ?? null;
     this._itemConfig      = data.itemConfig     ?? null;
+    this._playerNames     = Array.isArray(data.playerNames) ? data.playerNames : [];
     this._unsubs          = [];
     this._goingToLobby    = false;
     this._pendingLobbyData = null;
@@ -106,7 +107,8 @@ export class GameScene extends Phaser.Scene {
     // ── Players ──────────────────────────────────────────────────────────────
     this.players = [];
     for (let i = 0; i < this.playerCount; i++) {
-      const p = new Player(this, i, this.map, this.bombManager);
+      const safeName = String(this._playerNames[i] || `P${i + 1}`).trim().slice(0, 12) || `P${i + 1}`;
+      const p = new Player(this, i, this.map, this.bombManager, safeName);
       this.players.push(p);
       // Online host: hook player events into event buffer
       if (this.isOnlineHost) {

@@ -11,12 +11,16 @@ export class Player {
    * @param {number}       index - 0-based player index
    * @param {object[][]}   map   - tile map reference
    * @param {object}       bombManager
+   * @param {string}       displayName
    */
-  constructor(scene, index, map, bombManager) {
+  constructor(scene, index, map, bombManager, displayName = '') {
     this.scene      = scene;
     this.index      = index;
     this.map        = map;
     this.bombManager = bombManager;
+
+    const safeDisplayName = String(displayName || `P${index + 1}`).trim().slice(0, 12);
+    this.displayName = safeDisplayName || `P${index + 1}`;
 
     const spawn = SPAWN_POSITIONS[index];
     const pos   = tileToPixel(spawn.col, spawn.row, TILE_SIZE);
@@ -44,10 +48,10 @@ export class Player {
     this.sprite.setDepth(10);
     this.sprite.setData('playerIndex', index);
 
-    // Create player number text label
+    // Create player name text label
     this.label = scene.add.text(pos.x, pos.y - TILE_SIZE / 2 - 4,
-      `P${index + 1}`, {
-        fontSize: '11px',
+      this.displayName, {
+        fontSize: '10px',
         color: '#ffffff',
         stroke: '#000000',
         strokeThickness: 3,
@@ -449,6 +453,7 @@ export class Player {
   _tryPlaceMultiBomb() {
     const facingDelta = { right: [1,0], left: [-1,0], up: [0,-1], down: [0,1] };
     const [dc, dr] = facingDelta[this._facing] || [0, 1];
+    const R = Math.round(TILE_SIZE * 3 / 8);
     const { col: startCol, row: startRow } = this.tilePos;
     const limit = this.stats.maxBombs - this.activeBombs;  // capture before loop: activeBombs++ would otherwise shrink this each iteration
     let placed = 0;
@@ -461,6 +466,10 @@ export class Player {
         const bomb = this.bombManager.placeBomb(c, r, this);
         if (bomb) {
           this.activeBombs++;
+          // If the new bomb overlaps the current hitbox, allow exiting its tile.
+          if (this._overlapsCircle(this.sprite.x, this.sprite.y, R, c, r)) {
+            this._passableBombs.add(`${c},${r}`);
+          }
           audioManager.playPlaceBomb();
           placed++;
         }

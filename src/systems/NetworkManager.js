@@ -85,7 +85,11 @@ class NetworkManager {
 
     s.on('room_error',   msg           => this._emit('room_error', msg));
     s.on('room_update',  info          => {
-      if (info.players) this.lastPlayers = info.players;
+      if (info.players) {
+        this.lastPlayers = info.players;
+        const me = info.players.find(p => p.playerIndex === this.playerIndex);
+        if (me?.name) this.playerName = me.name;
+      }
       this._emit('room_update', info);
     });
     s.on('game_start',   data          => this._emit('game_start', data));
@@ -122,14 +126,16 @@ class NetworkManager {
   // ── Server actions ─────────────────────────────────────────────────────────
   createRoom(name = '') {
     this._require();
-    this.playerName = name;
-    this.socket.emit('create_room', { name });
+    const safeName = String(name || '').trim().slice(0, 12);
+    this.playerName = safeName;
+    this.socket.emit('create_room', { name: safeName });
   }
 
   joinRoom(code, name = '') {
     this._require();
-    this.playerName = name;
-    this.socket.emit('join_room', { roomCode: code, name });
+    const safeName = String(name || '').trim().slice(0, 12);
+    this.playerName = safeName;
+    this.socket.emit('join_room', { roomCode: code, name: safeName });
   }
 
   startGame(itemConfig = {}) {
@@ -140,6 +146,14 @@ class NetworkManager {
   returnToLobby() {
     if (!this.socket || !this.roomCode) return;
     this.socket.emit('return_to_lobby', { roomCode: this.roomCode });
+  }
+
+  updateName(name = '') {
+    if (!this.socket || !this.connected) return;
+    const safeName = String(name || '').trim().slice(0, 12);
+    if (!safeName) return;
+    this.playerName = safeName;
+    this.socket.emit('update_name', { roomCode: this.roomCode || '', name: safeName });
   }
 
   /** Host → all other clients (batched at 20hz by GameScene) */
