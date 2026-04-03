@@ -53,36 +53,88 @@
         user-select: none;
       }
 
-      /* ── Joystick ──────────────────────────────────────────────── */
+      /* ── 8-direction pad ───────────────────────────────────────── */
       #joystick-zone {
-        width: 148px;
-        height: 148px;
+        width: 170px;
+        height: 170px;
         display: flex;
         align-items: center;
         justify-content: center;
       }
 
       #joystick-base {
-        width: 124px;
-        height: 124px;
+        width: 148px;
+        height: 148px;
         border-radius: 50%;
-        background: rgba(255,255,255,0.055);
-        border: 2px solid rgba(255,255,255,0.15);
+        background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.08), rgba(18,27,52,0.86));
+        border: 2px solid rgba(185, 210, 255, 0.25);
         position: relative;
         display: flex;
         align-items: center;
         justify-content: center;
+        box-shadow: inset 0 0 26px rgba(6, 10, 24, 0.95), 0 7px 22px rgba(0,0,0,0.42);
       }
 
-      #joystick-knob {
-        width: 52px;
-        height: 52px;
-        border-radius: 50%;
-        background: radial-gradient(circle at 38% 30%, rgba(255,255,255,0.65), rgba(160,160,220,0.30));
-        border: 2px solid rgba(255,255,255,0.55);
+      #joystick-base::before {
+        content: '';
         position: absolute;
+        inset: 12px;
+        border-radius: 50%;
+        border: 1px solid rgba(180, 205, 255, 0.16);
         pointer-events: none;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.45);
+      }
+
+      .joystick-arrow {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 30px;
+        height: 30px;
+        transform: translate(-50%, -50%) translate(var(--tx), var(--ty));
+        transition: transform 0.08s ease;
+        pointer-events: none;
+      }
+
+      .joystick-arrow::before {
+        content: '';
+        position: absolute;
+        inset: 3px;
+        clip-path: polygon(50% 6%, 96% 94%, 4% 94%);
+        background: rgba(226, 236, 255, 0.9);
+        transform: rotate(var(--rot));
+        filter: drop-shadow(0 1px 2px rgba(0,0,0,0.45));
+      }
+
+      .joystick-arrow[data-index="1"]::before,
+      .joystick-arrow[data-index="3"]::before,
+      .joystick-arrow[data-index="5"]::before,
+      .joystick-arrow[data-index="7"]::before {
+        background: transparent;
+        box-shadow: inset 0 0 0 2px rgba(226, 236, 255, 0.9);
+      }
+
+      .joystick-arrow.active {
+        transform: translate(-50%, -50%) translate(var(--tx), var(--ty)) scale(1.08);
+      }
+
+      .joystick-arrow.active::before {
+        background: #8ce8ff;
+        box-shadow: none;
+      }
+
+      #joystick-center {
+        width: 62px;
+        height: 62px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 35% 35%, #1c273d, #060d1e);
+        border: 2px solid rgba(219, 232, 255, 0.18);
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        pointer-events: none;
+        transform: translate(calc(-50% + var(--center-offset-x, 0px)), calc(-50% + var(--center-offset-y, 0px)));
+        transition: transform 0.09s ease-out;
+        box-shadow: inset 0 0 10px rgba(0,0,0,0.65), 0 3px 9px rgba(0,0,0,0.45);
       }
 
       /* ── Buttons ───────────────────────────────────────────────── */
@@ -132,7 +184,15 @@
   <div id="mobile-controls">
     <div id="joystick-zone">
       <div id="joystick-base">
-        <div id="joystick-knob"></div>
+        <div class="joystick-arrow" data-index="6" style="--tx: 0px; --ty: -58px; --rot: 0deg;"></div>
+        <div class="joystick-arrow" data-index="7" style="--tx: 41px; --ty: -41px; --rot: 45deg;"></div>
+        <div class="joystick-arrow" data-index="0" style="--tx: 58px; --ty: 0px; --rot: 90deg;"></div>
+        <div class="joystick-arrow" data-index="1" style="--tx: 41px; --ty: 41px; --rot: 135deg;"></div>
+        <div class="joystick-arrow" data-index="2" style="--tx: 0px; --ty: 58px; --rot: 180deg;"></div>
+        <div class="joystick-arrow" data-index="3" style="--tx: -41px; --ty: 41px; --rot: 225deg;"></div>
+        <div class="joystick-arrow" data-index="4" style="--tx: -58px; --ty: 0px; --rot: 270deg;"></div>
+        <div class="joystick-arrow" data-index="5" style="--tx: -41px; --ty: -41px; --rot: 315deg;"></div>
+        <div id="joystick-center"></div>
       </div>
     </div>
     <div id="buttons-area">
@@ -143,7 +203,7 @@
 
   <script type="module" src="/src/main.js"></script>
   <script>
-    /* ── Mobile virtual controls ──────────────────────────────────
+     /* ── Mobile virtual controls ──────────────────────────────────
        Writes to window._mobileJoystick and window._mobileBtns.
        InputManager.getState(0) reads + clears these each frame.
     ─────────────────────────────────────────────────────────────── */
@@ -155,13 +215,26 @@
 
       var zone      = document.getElementById('joystick-zone');
       var base      = document.getElementById('joystick-base');
-      var knob      = document.getElementById('joystick-knob');
+      var arrows    = Array.prototype.slice.call(base.querySelectorAll('.joystick-arrow'));
+      var centerDot = document.getElementById('joystick-center');
       var btnBomb   = document.getElementById('btn-bomb');
       var btnAction = document.getElementById('btn-action');
 
-      var RADIUS  = 36;   // max knob travel from center, px
-      var DEAD    = 14;   // dead-zone radius, px
+      var DEAD = 16;      // neutral center radius, px
+      var CENTER_DRIFT = 4;
+      var DIAG = Math.SQRT1_2;
+      var DIRS = [
+        { up: false, down: false, left: false, right: true,  vx: 1,     vy: 0 },
+        { up: false, down: true,  left: false, right: true,  vx: DIAG,  vy: DIAG },
+        { up: false, down: true,  left: false, right: false, vx: 0,     vy: 1 },
+        { up: false, down: true,  left: true,  right: false, vx: -DIAG, vy: DIAG },
+        { up: false, down: false, left: true,  right: false, vx: -1,    vy: 0 },
+        { up: true,  down: false, left: true,  right: false, vx: -DIAG, vy: -DIAG },
+        { up: true,  down: false, left: false, right: false, vx: 0,     vy: -1 },
+        { up: true,  down: false, left: false, right: true,  vx: DIAG,  vy: -DIAG },
+      ];
       var touchId = null;
+      var activeDir = null;
       var cx = 0, cy = 0;
 
       function updateCenter() {
@@ -170,32 +243,51 @@
         cy = r.top  + r.height * 0.5;
       }
 
-      function moveKnob(tx, ty) {
+      function applyDirection(index) {
+        if (activeDir === index) return;
+        activeDir = index;
+
+        arrows.forEach(function (el) {
+          var isActive = Number(el.getAttribute('data-index')) === index;
+          el.classList.toggle('active', isActive);
+        });
+
+        var j = window._mobileJoystick;
+        if (index === null || index < 0 || index >= DIRS.length) {
+          j.vx = 0;
+          j.vy = 0;
+          j.up = j.down = j.left = j.right = false;
+          centerDot.style.setProperty('--center-offset-x', '0px');
+          centerDot.style.setProperty('--center-offset-y', '0px');
+          return;
+        }
+
+        var d = DIRS[index];
+        j.vx = d.vx;
+        j.vy = d.vy;
+        j.up = d.up;
+        j.down = d.down;
+        j.left = d.left;
+        j.right = d.right;
+        centerDot.style.setProperty('--center-offset-x', (d.vx * CENTER_DRIFT) + 'px');
+        centerDot.style.setProperty('--center-offset-y', (d.vy * CENTER_DRIFT) + 'px');
+      }
+
+      function updateDirection(tx, ty) {
         var dx   = tx - cx;
         var dy   = ty - cy;
         var dist = Math.sqrt(dx * dx + dy * dy);
-        var clamped = Math.min(dist, RADIUS);
-        var angle   = Math.atan2(dy, dx);
-        knob.style.transform =
-          'translate(' + (Math.cos(angle) * clamped) + 'px,' +
-                         (Math.sin(angle) * clamped) + 'px)';
-        var j = window._mobileJoystick;
-        var active = dist >= DEAD;
-        // Normalized analog vector — magnitude always 1 when outside dead-zone
-        j.vx = active ? Math.cos(angle) : 0;
-        j.vy = active ? Math.sin(angle) : 0;
-        // Boolean flags kept for compatibility
-        j.up    = active && dy < -DEAD;
-        j.down  = active && dy >  DEAD;
-        j.left  = active && dx < -DEAD;
-        j.right = active && dx >  DEAD;
-      }
 
-      function resetKnob() {
-        knob.style.transform = 'translate(0px,0px)';
-        var j = window._mobileJoystick;
-        j.vx = 0; j.vy = 0;
-        j.up = j.down = j.left = j.right = false;
+        if (dist < DEAD) {
+          applyDirection(null);
+          return;
+        }
+
+        var angle = Math.atan2(dy, dx);
+        var step  = Math.PI / 4;
+        var index = Math.round(angle / step);
+        index = (index + 8) % 8;
+        applyDirection(index);
       }
 
       zone.addEventListener('touchstart', function (e) {
@@ -204,14 +296,14 @@
         var t = e.changedTouches[0];
         touchId = t.identifier;
         updateCenter();
-        moveKnob(t.clientX, t.clientY);
+        updateDirection(t.clientX, t.clientY);
       }, { passive: false });
 
       zone.addEventListener('touchmove', function (e) {
         e.preventDefault();
         for (var i = 0; i < e.changedTouches.length; i++) {
           if (e.changedTouches[i].identifier === touchId) {
-            moveKnob(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
+            updateDirection(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
             return;
           }
         }
@@ -222,13 +314,16 @@
         for (var i = 0; i < e.changedTouches.length; i++) {
           if (e.changedTouches[i].identifier === touchId) {
             touchId = null;
-            resetKnob();
+            applyDirection(null);
             return;
           }
         }
       }
       zone.addEventListener('touchend',    endJoystick, { passive: false });
       zone.addEventListener('touchcancel', endJoystick, { passive: false });
+      window.addEventListener('resize', updateCenter);
+      window.addEventListener('orientationchange', updateCenter);
+      updateCenter();
 
       /* ── Buttons ─────────────────────────────────────────────── */
       function setupBtn(el, field) {
