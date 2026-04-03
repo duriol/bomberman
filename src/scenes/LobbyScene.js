@@ -55,15 +55,15 @@ export class LobbyScene extends Phaser.Scene {
       backgroundColor: '#0c2130', padding: { x: 8, y: 3 },
     }).setOrigin(0.5);
 
-    this._status = this.add.text(CX, 74, '', {
+    this._status = this.add.text(CX, 80, '', {
       fontSize: '13px', fontFamily: 'monospace', color: '#c9ecff',
       backgroundColor: '#10273b', padding: { x: 10, y: 4 },
     }).setOrigin(0.5);
 
     // Visual panel guides
-    this._drawPanel(CX, 156, 590, 128, 0x091d2f, 0x2cb6e1);
-    this._drawPanel(CX, 282, 620, 150, 0x0b1a2e, 0x5874ad);
-    this._drawPanel(CX, 432, 620, 216, 0x111822, 0x39b7d5);
+    this._grpConnect.push(...this._drawPanel(CX, 156, 590, 128, 0x091d2f, 0x2cb6e1));
+    this._grpRole.push(...this._drawPanel(CX, 282, 620, 150, 0x0b1a2e, 0x5874ad));
+    this._grpRoom.push(...this._drawPanel(CX, 432, 620, 216, 0x111822, 0x39b7d5));
 
     // ── Section: Connect ───────────────────────────────────────────────
     const lblName = this.add.text(CX, 98, 'IDENTIDAD', {
@@ -309,6 +309,7 @@ export class LobbyScene extends Phaser.Scene {
     panel.fillRoundedRect(x, y, w, h, 12);
     panel.lineStyle(2, border, 0.65);
     panel.strokeRoundedRect(x, y, w, h, 12);
+    return [shadow, panel];
   }
 
   _makeBtn(x, y, label, bg, hoverBg = '#2b6e8d') {
@@ -549,6 +550,7 @@ export class LobbyScene extends Phaser.Scene {
         this._setRoomCode(roomCode);
         this._shareHint.setText('Comparte este código con tus amigos');
         this._showGroup(this._grpRole,   false);
+        this._showGroup(this._grpJoin,   false);
         this._showGroup(this._grpRoom,   true);
         this._showGroup(this._grpHost,   true);
         this._showGroup(this._grpClient, false);
@@ -591,6 +593,7 @@ export class LobbyScene extends Phaser.Scene {
       }),
       networkManager.on('return_to_lobby', ({ players, playerCount, roomCode }) => {
         // Could arrive if another tab / reconnect triggers it while already in lobby
+        this._showGroup(this._grpJoin, false);
         this._showGroup(this._grpRoom, true);
         if (networkManager.isHost) {
           this._showGroup(this._grpHost, true);
