@@ -5,6 +5,18 @@ import {
 import { pixelToTile, tileToPixel, isWalkable } from '../utils/MapGenerator.js';
 import { audioManager } from '../systems/AudioManager.js';
 
+const WOLF_FRAME_HEIGHT = 125;
+const WOLF_SCALE = TILE_SIZE / WOLF_FRAME_HEIGHT;
+const WOLF_ORIGIN_Y = 0.82;
+
+function mixColorWithWhite(color, amount = 0.55) {
+  const r = (color >> 16) & 0xff;
+  const g = (color >> 8) & 0xff;
+  const b = color & 0xff;
+  const mix = (channel) => Math.round(channel + (255 - channel) * amount);
+  return (mix(r) << 16) | (mix(g) << 8) | mix(b);
+}
+
 export class Player {
   /**
    * @param {Phaser.Scene} scene
@@ -42,11 +54,23 @@ export class Player {
     this.respawnInvincible = false;  // true during post-respawn grace period
     this.onEvent = null;  // optional callback for online host event buffering
 
+    this._usesWolfSprite = scene.textures.exists('wolf_idle_down');
+    const colorEntry = PLAYER_COLORS[this.index % PLAYER_COLORS.length];
+    this._wolfBaseTint = this._usesWolfSprite
+      ? mixColorWithWhite(colorEntry?.main ?? 0xffffff)
+      : null;
+
     // Create sprite
-    this.sprite = scene.physics.add.sprite(pos.x, pos.y, `player_${index}_idle`);
+    const initialTexture = this._usesWolfSprite ? 'wolf_idle_down' : `player_${index}_idle`;
+    this.sprite = scene.physics.add.sprite(pos.x, pos.y, initialTexture);
     this.sprite.setCollideWorldBounds(true);
     this.sprite.setDepth(10);
     this.sprite.setData('playerIndex', index);
+    if (this._usesWolfSprite) {
+      this.sprite.setScale(WOLF_SCALE);
+      this.sprite.setOrigin(0.5, WOLF_ORIGIN_Y);
+      this.sprite.setTint(this._wolfBaseTint);
+    }
 
     // Create player name text label
     this.label = scene.add.text(pos.x, pos.y - TILE_SIZE / 2 - 4,
@@ -80,6 +104,7 @@ export class Player {
   }
 
   _createAnims() {
+    if (this._usesWolfSprite) return;
     const key = `player_${this.index}`;
     if (!this.scene.anims.exists(`${key}_walk`)) {
       this.scene.anims.create({
@@ -94,6 +119,77 @@ export class Player {
         repeat: -1,
       });
     }
+  }
+
+  _getWalkFrameCount() {
+    if (!this._usesWolfSprite) return 4;
+    return (this._facing === 'left' || this._facing === 'right') ? 6 : 4;
+  }
+
+  _setIdleTexture() {
+    if (!this._usesWolfSprite) {
+      this.sprite.setFlipX(false);
+      this.sprite.setTexture(`player_${this.index}_idle`);
+      return;
+    }
+
+    if (this._facing === 'up') {
+      this.sprite.setFlipX(false);
+      this.sprite.setTexture('wolf_idle_up');
+      return;
+    }
+
+    if (this._facing === 'left') {
+      this.sprite.setFlipX(true);
+      this.sprite.setTexture('wolf_idle_right');
+      return;
+    }
+
+    if (this._facing === 'right') {
+      this.sprite.setFlipX(false);
+      this.sprite.setTexture('wolf_idle_right');
+      return;
+    }
+
+    this.sprite.setFlipX(false);
+    this.sprite.setTexture('wolf_idle_down');
+  }
+
+  _setWalkTexture() {
+    if (!this._usesWolfSprite) {
+      this.sprite.setFlipX(false);
+      this.sprite.setTexture(`player_${this.index}_walk_${this._walkFrame}`);
+      return;
+    }
+
+    if (this._facing === 'up') {
+      this.sprite.setFlipX(false);
+      this.sprite.setTexture(`wolf_walk_up_${this._walkFrame + 1}`);
+      return;
+    }
+
+    if (this._facing === 'down') {
+      this.sprite.setFlipX(false);
+      this.sprite.setTexture(`wolf_walk_down_${this._walkFrame + 1}`);
+      return;
+    }
+
+    this.sprite.setFlipX(this._facing === 'left');
+    this.sprite.setTexture(`wolf_walk_right_${this._walkFrame + 1}`);
+  }
+
+  _restoreBaseTint() {
+    if (this._usesWolfSprite) this.sprite.setTint(this._wolfBaseTint);
+  }
+
+  _setDeadTexture() {
+    if (this._usesWolfSprite) {
+      this.sprite.setFlipX(false);
+      this.sprite.setTexture('wolf_idle_down');
+      this._restoreBaseTint();
+      return;
+    }
+    this.sprite.setTexture(`player_${this.index}_dead`);
   }
 
   get x() { return this.sprite.x; }
@@ -193,6 +289,10 @@ export class Player {
       const rushStep = this.stats.speed * 3 * (delta / 1000);
       vx = this._rushVx;
       vy = this._rushVy;
+      if      (vx > 0) this._facing = 'right';
+      else if (vx < 0) this._facing = 'left';
+      else if (vy < 0) this._facing = 'up';
+      else if (vy > 0) this._facing = 'down';
       const nx = this.sprite.x + vx * rushStep;
       const ny = this.sprite.y + vy * rushStep;
       const canX = this._canMoveCircle(nx, this.sprite.y, R);
@@ -209,8 +309,13 @@ export class Player {
         this.label.setPosition(this.sprite.x, this.sprite.y - TILE_SIZE / 2 - 4);
         // Walk animation
         this._walkTimer += delta;
-        if (this._walkTimer > 80) { this._walkTimer = 0; this._walkFrame = (this._walkFrame + 1) % 4; }
-        this.sprite.setTexture(`player_${this.index}_walk_${this._walkFrame}`);
+        const frameCount = this._getWalkFrameCount();
+        if (this._walkTimer > 80) {
+          this._walkTimer = 0;
+          this._walkFrame = (this._walkFrame + 1) % frameCount;
+        }
+        this._walkFrame %= frameCount;
+        this._setWalkTexture();
       }
       return;
     }
@@ -373,14 +478,16 @@ export class Player {
 
     if (moving) {
       this._walkTimer += delta;
+      const frameCount = this._getWalkFrameCount();
       if (this._walkTimer > 120) {
         this._walkTimer = 0;
-        this._walkFrame = (this._walkFrame + 1) % 4;
+        this._walkFrame = (this._walkFrame + 1) % frameCount;
       }
-      this.sprite.setTexture(`player_${this.index}_walk_${this._walkFrame}`);
+      this._walkFrame %= frameCount;
+      this._setWalkTexture();
     } else {
       this._walkFrame = 0;
-      this.sprite.setTexture(`player_${this.index}_idle`);
+      this._setIdleTexture();
     }
   }
 
@@ -523,6 +630,7 @@ export class Player {
     this._rushPending = false;
     this._rushTimer   = 0;
     this.sprite.clearTint();
+    this._restoreBaseTint();
     if (this._curseClearCallback) {
       const cb = this._curseClearCallback;
       this._curseClearCallback = null;
@@ -538,7 +646,7 @@ export class Player {
     if (this.stunned || this._isRushing || this._rushPending) this._clearCurse();
     audioManager.playPlayerDeath();
     this.alive = false;
-    this.sprite.setTexture(`player_${this.index}_dead`);
+    this._setDeadTexture();
     this.sprite.setAlpha(0.6);
     this.sprite.setDepth(1);
     this.label.setAlpha(0.3);
@@ -552,7 +660,8 @@ export class Player {
     const spawn = SPAWN_POSITIONS[this.index];
     const pos = tileToPixel(spawn.col, spawn.row, TILE_SIZE);
     this.sprite.setPosition(pos.x, pos.y);
-    this.sprite.setTexture(`player_${this.index}_idle`);
+    this._walkFrame = 0;
+    this._setIdleTexture();
     this.sprite.setAlpha(1);
     this.sprite.setDepth(10);
     this.sprite.clearTint();

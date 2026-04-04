@@ -33,7 +33,30 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    // Assets are generated programmatically — nothing to load
+    const wolfBase = '/assets/sprites/wolf';
+    const wolfFrames = [
+      'wolf_idle_down',
+      'wolf_idle_right',
+      'wolf_idle_up',
+      'wolf_walk_down_1',
+      'wolf_walk_down_2',
+      'wolf_walk_down_3',
+      'wolf_walk_down_4',
+      'wolf_walk_right_1',
+      'wolf_walk_right_2',
+      'wolf_walk_right_3',
+      'wolf_walk_right_4',
+      'wolf_walk_right_5',
+      'wolf_walk_right_6',
+      'wolf_walk_up_1',
+      'wolf_walk_up_2',
+      'wolf_walk_up_3',
+      'wolf_walk_up_4',
+    ];
+
+    wolfFrames.forEach((key) => {
+      this.load.image(key, `${wolfBase}/${key}.png`);
+    });
   }
 
   create() {
@@ -488,6 +511,9 @@ export class GameScene extends Phaser.Scene {
         down:        myInput.down,
         left:        myInput.left,
         right:       myInput.right,
+        mv:          myPlayer ? ((Math.abs(myPlayer._lastMoveVx || 0) > 0.01 || Math.abs(myPlayer._lastMoveVy || 0) > 0.01) ? 1 : 0) : 0,
+        mvx:         myPlayer ? (myPlayer._lastMoveVx || 0) : 0,
+        mvy:         myPlayer ? (myPlayer._lastMoveVy || 0) : 0,
         bombJust:    myInput.bombJust,
         actionJust:  myInput.actionJust,
         fac:         myPlayer ? myPlayer._facing : 'down',
@@ -525,6 +551,9 @@ export class GameScene extends Phaser.Scene {
             // Client-authoritative: use position reported by the client
             // Copy input so we can clear the latched flags in storage BEFORE processing,
             // preventing bombJust/actionJust from firing again on the next host frame.
+            const rp = this.players[i];
+            const prevX = rp.x;
+            const prevY = rp.y;
             const stored = this._remoteInputs[i];
             input = stored ? { ...stored } : null;
             if (stored) {
@@ -536,12 +565,41 @@ export class GameScene extends Phaser.Scene {
               stored.kr = undefined;
             }
             if (input && input.x !== undefined) {
-              this.players[i].sprite.setPosition(input.x, input.y);
-              this.players[i]._walkFrame = input.fr || 0;
+              rp.sprite.setPosition(input.x, input.y);
+              rp._walkFrame = input.fr || 0;
+
+              const dx = input.x - prevX;
+              const dy = input.y - prevY;
+              const mag = Math.hypot(dx, dy);
+              if (typeof input.mvx === 'number' || typeof input.mvy === 'number') {
+                rp._lastMoveVx = input.mvx || 0;
+                rp._lastMoveVy = input.mvy || 0;
+              } else if (mag > 0.0001) {
+                rp._lastMoveVx = dx / mag;
+                rp._lastMoveVy = dy / mag;
+              } else {
+                rp._lastMoveVx = 0;
+                rp._lastMoveVy = 0;
+              }
             }
             // Apply facing so multi-bomb fires in the correct direction
-            if (input && input.fac) this.players[i]._facing = input.fac;
-            this.players[i].updateActionsOnly(delta, input || _emptyInput());
+            if (input && input.fac) rp._facing = input.fac;
+
+            if (rp.alive) {
+              const movedNow = !!(
+                (input && (input.mv || input.up || input.down || input.left || input.right))
+                || Math.abs(rp._lastMoveVx) > 0.01
+                || Math.abs(rp._lastMoveVy) > 0.01
+              );
+              if (rp._remoteAnimHold === undefined) rp._remoteAnimHold = 0;
+              if (movedNow) rp._remoteAnimHold = 140;
+              else rp._remoteAnimHold = Math.max(0, rp._remoteAnimHold - delta);
+              const moved = rp._remoteAnimHold > 0;
+              if (moved) rp._setWalkTexture();
+              else rp._setIdleTexture();
+            }
+
+            rp.updateActionsOnly(delta, input || _emptyInput());
           }
         } else {
           input = this.inputManager.getState(i);
@@ -760,6 +818,7 @@ export class GameScene extends Phaser.Scene {
         y:   Math.round(p.y),
         vx:  p._lastMoveVx || 0,
         vy:  p._lastMoveVy || 0,
+        fd:  p._facing || 'down',
         al:  p.alive,
         lv:  p.lives,
         mb:  p.stats.maxBombs,
@@ -823,6 +882,9 @@ export class GameScene extends Phaser.Scene {
         const p = this.players[i];
         if (!p) return;
 
+        if (ps.fd) p._facing = ps.fd;
+        p._walkFrame = ps.fr || 0;
+
         if (i !== this.myPlayerIndex) {
           // Other players: interpolate toward authoritative position
           if (ps.al) {
@@ -835,13 +897,17 @@ export class GameScene extends Phaser.Scene {
               p.label.setPosition(ps.x, ps.y - 28);
               p.label.setAlpha(1);
             }
-            p.sprite.setTexture(`player_${i}_walk_${ps.fr}`);
+            if ((ps.vx || 0) !== 0 || (ps.vy || 0) !== 0) {
+              p._setWalkTexture();
+            } else {
+              p._setIdleTexture();
+            }
           } else {
             // Dead: snap directly, no interpolation needed
             p.sprite.setPosition(ps.x, ps.y);
             p.label.setPosition(ps.x, ps.y - 28);
             if (p.alive && !ps.al) {
-              p.sprite.setTexture(`player_${i}_dead`);
+              p._setDeadTexture();
               p.sprite.setAlpha(0.6);
               p.sprite.setDepth(1);
               p.label.setAlpha(0.3);
@@ -852,17 +918,19 @@ export class GameScene extends Phaser.Scene {
           // Only apply state transitions (death / respawn), never snap during movement.
           if (p.alive && !ps.al) {
             // Host confirmed death
-            p.sprite.setTexture(`player_${i}_dead`);
+            p._setDeadTexture();
             p.sprite.setAlpha(0.6);
             p.sprite.setDepth(1);
             p.label.setAlpha(0.3);
           } else if (!p.alive && ps.al) {
             // Host confirmed respawn — snap to spawn point and flash
             p.sprite.setPosition(ps.x, ps.y);
-            p.sprite.setTexture(`player_${i}_idle`);
+            p._walkFrame = 0;
+            p._setIdleTexture();
             p.sprite.setAlpha(1);
             p.sprite.setDepth(10);
             p.sprite.clearTint();
+            p._restoreBaseTint();
             p.label.setAlpha(1);
             p.label.setPosition(ps.x, ps.y - 28);
             this.tweens.add({
@@ -899,7 +967,8 @@ export class GameScene extends Phaser.Scene {
         } else if (ps.ra) {
           p.sprite.setTint(0xff6600);
         } else if (ps.al) {
-          p.sprite.clearTint();
+          if (p._usesWolfSprite) p._restoreBaseTint();
+          else p.sprite.clearTint();
         }
       });
     }
