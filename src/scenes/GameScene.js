@@ -33,7 +33,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    const wolfBase = '/assets/sprites/wolf';
+    const envBase = import.meta.env.BASE_URL || '/';
+    let runtimeBase = new URL('.', window.location.href).pathname;
+    if (runtimeBase === '/' && window.location.pathname && window.location.pathname !== '/') {
+      runtimeBase = window.location.pathname.endsWith('/')
+        ? window.location.pathname
+        : `${window.location.pathname}/`;
+    }
+    const baseUrl = (envBase === '/' && runtimeBase !== '/') ? runtimeBase : envBase;
+    const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+    const wolfBase = `${normalizedBase}assets/sprites/wolf`;
     const wolfFrames = [
       'wolf_idle_down',
       'wolf_idle_right',

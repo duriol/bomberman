@@ -1,9 +1,17 @@
 import { defineConfig } from 'vite';
 
-// When deploying to GitHub Pages set VITE_BASE to '/<repo-name>/'
-// e.g. VITE_BASE=/bomberman/ pnpm build
-// For local dev or custom domain, leave unset (defaults to '/')
-const base = process.env.VITE_BASE ?? '/';
+function inferBaseFromGithub() {
+  const repo = process.env.GITHUB_REPOSITORY?.split('/')[1];
+  if (!repo) return '/';
+  return `/${repo}/`;
+}
+
+// Base URL priority:
+// 1) VITE_BASE explicit override
+// 2) GitHub Actions repo-derived base for Pages deployments
+// 3) Local/default '/'
+const base = process.env.VITE_BASE
+  ?? (process.env.GITHUB_ACTIONS ? inferBaseFromGithub() : '/');
 
 export default defineConfig({
   base,

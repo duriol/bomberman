@@ -36,17 +36,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'pnpm'
+          cache: "pnpm"
           cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Derive the base path from the repo name: /bomberman/
       - name: Build frontend
         run: pnpm build
         env:
-          VITE_BASE: /${{ github.event.repository.name }}/
           # Optional: bake the server URL into the build so players don't have
           # to type it in the lobby. Remove if you prefer runtime input.
           VITE_SERVER_URL: ${{ secrets.SERVER_URL }}
