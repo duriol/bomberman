@@ -552,6 +552,14 @@ export class Player {
     if (bomb) {
       this.activeBombs++;
       this._passableBombs.add(`${col},${row}`);
+      // Allow any player standing on this tile to exit (handles remote players placing bombs under others)
+      const R = Math.round(TILE_SIZE * 3 / 8);
+      for (const player of this.scene.players || []) {
+        if (player === this) continue;
+        if (player._overlapsCircle(player.x, player.y, R, col, row)) {
+          player._passableBombs.add(`${col},${row}`);
+        }
+      }
       audioManager.playPlaceBomb();
     }
   }

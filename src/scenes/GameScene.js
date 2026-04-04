@@ -1013,6 +1013,29 @@ export class GameScene extends Phaser.Scene {
         if (!this.bombManager.bombs.has(key)) this.bombManager.remoteBombs.add(key);
       }
 
+      // If a remote bomb just appeared where the local player is standing,
+      // add it to their passable set so they can exit the tile.
+      const myPlayer = this.players[this.myPlayerIndex];
+      if (myPlayer) {
+        const R = Math.round(TILE_SIZE * 3 / 8);
+        const playerTile = myPlayer.tilePos;
+        for (const { col, row } of state.bm) {
+          const key = `${col},${row}`;
+          // Skip own bombs
+          if (this.bombManager.bombs.has(key)) continue;
+          // Check if player overlaps the bomb tile OR is standing in that tile
+          const overlaps = myPlayer._overlapsCircle(myPlayer.x, myPlayer.y, R, col, row);
+          const sameTile = playerTile.col === col && playerTile.row === row;
+          // Also allow if player is very close to the bomb center (handles edge cases)
+          const bombCenter = tileToPixel(col, row, TILE_SIZE);
+          const distToBomb = Phaser.Math.Distance.Between(myPlayer.x, myPlayer.y, bombCenter.x, bombCenter.y);
+          const closeToBomb = distToBomb < TILE_SIZE * 0.8;
+          if (overlaps || sameTile || closeToBomb) {
+            myPlayer._passableBombs.add(key);
+          }
+        }
+      }
+
       for (const { col, row } of state.bm) {
         const key = `${col},${row}`;
         // Own bomb still at this exact position — its sprite is already rendered
