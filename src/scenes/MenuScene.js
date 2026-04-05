@@ -23,8 +23,16 @@ export class MenuScene extends Phaser.Scene {
     const cx = width / 2;
 
     // Desbloqueo de audio en móviles: primer toque en pantalla
-    this.input.once('pointerdown', () => {
+    this.input.once('pointerdown', async () => {
       audioManager.init();
+      // Safari iOS: forzar resume si está suspendido
+      try {
+        if (audioManager.ctx && audioManager.ctx.state === 'suspended') {
+          await audioManager.ctx.resume();
+        }
+      } catch (e) {
+        // Ignorar errores de resume
+      }
     });
 
     this._localProfiles = [
