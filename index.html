@@ -139,18 +139,21 @@
 
       /* ── Buttons ───────────────────────────────────────────────── */
       #buttons-area {
-        display: flex;
-        gap: 18px;
-        align-items: center;
+        position: relative;
+        width: 188px;
+        height: 188px;
       }
 
       .mobile-btn {
-        width: 78px;
-        height: 78px;
+        position: absolute;
+        width: 74px;
+        height: 74px;
         border-radius: 50%;
         border: none;
         outline: none;
-        font-size: 32px;
+        font-size: 24px;
+        font-family: monospace;
+        color: #f2f8ff;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -161,19 +164,51 @@
         -webkit-tap-highlight-color: transparent;
         box-shadow: 0 5px 18px rgba(0,0,0,0.55), inset 0 1px 1px rgba(255,255,255,0.18);
         transition: transform 0.07s, box-shadow 0.07s;
+        transform: var(--btn-transform);
       }
 
       .mobile-btn.pressed {
-        transform: scale(0.86);
+        transform: var(--btn-transform) scale(0.86);
         box-shadow: 0 2px 6px rgba(0,0,0,0.4);
       }
 
-      #btn-bomb {
-        background: radial-gradient(circle at 38% 32%, #ff7e42, #b03020);
+      .mobile-btn::after {
+        content: attr(data-label);
+        position: absolute;
+        left: 50%;
+        top: calc(100% + 6px);
+        transform: translateX(-50%);
+        font-size: 10px;
+        color: rgba(220, 236, 255, 0.82);
+        letter-spacing: 0.3px;
       }
 
-      #btn-action {
-        background: radial-gradient(circle at 38% 32%, #fce76a, #c59a10);
+      #btn-a4 {
+        left: 50%;
+        top: 0;
+        --btn-transform: translateX(-50%);
+        background: radial-gradient(circle at 38% 32%, #8797ff, #394cb0);
+      }
+
+      #btn-a1 {
+        left: 50%;
+        bottom: 0;
+        --btn-transform: translateX(-50%);
+        background: radial-gradient(circle at 38% 32%, #ff7e59, #b53a24);
+      }
+
+      #btn-a3 {
+        left: 0;
+        top: 50%;
+        --btn-transform: translateY(-50%);
+        background: radial-gradient(circle at 38% 32%, #ffd679, #b07b18);
+      }
+
+      #btn-a2 {
+        right: 0;
+        top: 50%;
+        --btn-transform: translateY(-50%);
+        background: radial-gradient(circle at 38% 32%, #88f3ff, #1c85a5);
       }
     }
   </style>
@@ -196,8 +231,10 @@
       </div>
     </div>
     <div id="buttons-area">
-      <button class="mobile-btn" id="btn-action">⚡</button>
-      <button class="mobile-btn" id="btn-bomb">💣</button>
+      <button class="mobile-btn" id="btn-a4" data-label="4 arriba">4</button>
+      <button class="mobile-btn" id="btn-a3" data-label="3 izquierda">3</button>
+      <button class="mobile-btn" id="btn-a2" data-label="2 derecha">2</button>
+      <button class="mobile-btn" id="btn-a1" data-label="1 abajo">1</button>
     </div>
   </div>
 
@@ -211,14 +248,24 @@
       'use strict';
 
       window._mobileJoystick = { up: false, down: false, left: false, right: false, vx: 0, vy: 0 };
-      window._mobileBtns     = { bomb: false, action: false };
+      window._mobileBtns     = {
+        a1: false,
+        a2: false,
+        a3: false,
+        a4: false,
+        // legacy aliases kept during migration
+        bomb: false,
+        action: false,
+      };
 
       var zone      = document.getElementById('joystick-zone');
       var base      = document.getElementById('joystick-base');
       var arrows    = Array.prototype.slice.call(base.querySelectorAll('.joystick-arrow'));
       var centerDot = document.getElementById('joystick-center');
-      var btnBomb   = document.getElementById('btn-bomb');
-      var btnAction = document.getElementById('btn-action');
+      var btnA1 = document.getElementById('btn-a1');
+      var btnA2 = document.getElementById('btn-a2');
+      var btnA3 = document.getElementById('btn-a3');
+      var btnA4 = document.getElementById('btn-a4');
 
       var DEAD = 16;      // neutral center radius, px
       var CENTER_DRIFT = 4;
@@ -341,8 +388,10 @@
         }, { passive: false });
       }
 
-      setupBtn(btnBomb,   'bomb');
-      setupBtn(btnAction, 'action');
+      setupBtn(btnA1, 'a1');
+      setupBtn(btnA2, 'a2');
+      setupBtn(btnA3, 'a3');
+      setupBtn(btnA4, 'a4');
     }());
   </script>
 </body>

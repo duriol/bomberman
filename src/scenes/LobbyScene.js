@@ -1,5 +1,13 @@
-import { GAME_WIDTH, CANVAS_HEIGHT, PLAYER_COLORS } from '../data/constants.js';
+import {
+  GAME_WIDTH,
+  CANVAS_HEIGHT,
+  PLAYER_COLORS,
+  CHARACTER_DEFS,
+  CHARACTER_IDS,
+  DEFAULT_CHARACTER_ID,
+} from '../data/constants.js';
 import { networkManager } from '../systems/NetworkManager.js';
+import { preloadCharacterSets, normalizeCharacterId } from '../utils/CharacterAssets.js';
 
 const W  = GAME_WIDTH;
 const H  = CANVAS_HEIGHT;
@@ -23,6 +31,10 @@ export class LobbyScene extends Phaser.Scene {
     this._copyResetEvent = null;
     this._playersCountText = null;
     this._playersListHint = null;
+    this._selectedCharacterId = networkManager.playerCharacterId || DEFAULT_CHARACTER_ID;
+    this._editModal = null;
+    this._editNameDraft = '';
+    this._editCharacterDraft = DEFAULT_CHARACTER_ID;
   }
 
   init(data) {
@@ -40,6 +52,14 @@ export class LobbyScene extends Phaser.Scene {
     this._copyResetEvent = null;
     this._playersCountText = null;
     this._playersListHint = null;
+    this._selectedCharacterId = networkManager.playerCharacterId || DEFAULT_CHARACTER_ID;
+    this._editModal = null;
+    this._editNameDraft = '';
+    this._editCharacterDraft = this._selectedCharacterId;
+  }
+
+  preload() {
+    preloadCharacterSets(this);
   }
 
   create() {
@@ -110,7 +130,7 @@ export class LobbyScene extends Phaser.Scene {
     this._grpRole.push(lblRole);
 
     const cardHost  = this._makeRoleCard(CX - 130, 282, 'ANFITRION', 'Crea sala y comparte codigo\n(recomendado)', '#0f3146', '#155575', '#8feeff');
-    cardHost.zone.on('pointerdown', () => networkManager.createRoom(this._playerName));
+    cardHost.zone.on('pointerdown', () => networkManager.createRoom(this._playerName, this._selectedCharacterId));
     this._grpRole.push(...cardHost.parts);
 
     const cardGuest = this._makeRoleCard(CX + 130, 282, 'INVITADO', 'Unete con codigo\nde un amigo', '#2e2335', '#4b3358', '#ffc88b');
@@ -151,7 +171,7 @@ export class LobbyScene extends Phaser.Scene {
 
     const btnJoin = this._makeBtn(CX, 434, 'UNIRSE A LA SALA', '#5c3414', '#845226');
     btnJoin.on('pointerdown', () => {
-      if (this._joinCode.length === 5) networkManager.joinRoom(this._joinCode, this._playerName);
+      if (this._joinCode.length === 5) networkManager.joinRoom(this._joinCode, this._playerName, this._selectedCharacterId);
       else this._setStatus('El codigo debe tener 5 caracteres', '#ff8866');
     });
     this._grpJoin.push(btnJoin);
@@ -175,7 +195,7 @@ export class LobbyScene extends Phaser.Scene {
     }).setOrigin(1, 0.5);
     this._grpRoom.push(this._playersCountText);
 
-    this._playersListHint = this.add.text(CX, 130, 'Lista en vivo - pulsa CAMBIAR en tu fila para renombrarte', {
+    this._playersListHint = this.add.text(CX, 130, 'Lista en vivo - pulsa EDITAR en tu fila para nombre y personaje', {
       fontSize: '10px', fontFamily: 'monospace', color: '#7fa7bf',
     }).setOrigin(0.5);
     this._grpRoom.push(this._playersListHint);
@@ -375,23 +395,196 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   _askRename() {
-    const current = this._playerName || ('Jugador ' + (networkManager.playerIndex + 1));
-    const next = window.prompt('Nuevo nombre (max 12):', current);
-    if (!next || !next.trim()) return;
-    const safeName = next.trim().slice(0, 12);
-    this._playerName = safeName;
-    if (this._nameDisplay) this._nameDisplay.setText(safeName);
-    if (Array.isArray(networkManager.lastPlayers) && networkManager.lastPlayers.length) {
-      const mine = networkManager.lastPlayers.find(p => p.playerIndex === networkManager.playerIndex);
-      if (mine) mine.name = safeName;
-      this._rebuildPlayerCards(networkManager.lastPlayers);
-    }
-    if (networkManager.connected && networkManager.roomCode) {
-      networkManager.updateName(safeName);
-      this._setStatus('Actualizando nombre...', '#8fd8ff');
-    } else {
-      this._setStatus('Nombre actualizado localmente', '#8fd8ff');
-    }
+    this._openEditModal();
+  }
+
+  _openEditModal() {
+    this._closeEditModal();
+
+    this._editNameDraft = String(this._playerName || ('Jugador ' + (networkManager.playerIndex + 1))).slice(0, 12);
+    this._editCharacterDraft = normalizeCharacterId(this._selectedCharacterId || DEFAULT_CHARACTER_ID);
+
+    const parts = [];
+    const cards = new Map();
+
+    const dim = this.add.graphics().setDepth(300);
+    dim.fillStyle(0x000000, 0.72);
+    dim.fillRect(0, 0, W, H);
+    parts.push(dim);
+
+    const panelW = 610;
+    const panelH = 390;
+    const px = CX - panelW / 2;
+    const py = H / 2 - panelH / 2;
+
+    const panel = this.add.graphics().setDepth(301);
+    panel.fillStyle(0x0b1f34, 0.98);
+    panel.fillRoundedRect(px, py, panelW, panelH, 12);
+    panel.lineStyle(2, 0x4dd2ff, 0.9);
+    panel.strokeRoundedRect(px, py, panelW, panelH, 12);
+    parts.push(panel);
+
+    const panelBlocker = this.add.zone(CX, py + panelH / 2, panelW, panelH)
+      .setDepth(301)
+      .setInteractive();
+    panelBlocker.on('pointerdown', (_pointer, _lx, _ly, event) => {
+      event?.stopPropagation?.();
+    });
+    parts.push(panelBlocker);
+
+    const title = this.add.text(CX, py + 16, 'EDITAR PERFIL', {
+      fontSize: '20px', fontFamily: 'monospace', color: '#9af4ff',
+      stroke: '#0a3142', strokeThickness: 4,
+    }).setOrigin(0.5, 0).setDepth(302);
+    parts.push(title);
+
+    const nameLabel = this.add.text(px + 24, py + 58, 'Nombre:', {
+      fontSize: '11px', fontFamily: 'monospace', color: '#7fb7d5',
+    }).setDepth(302);
+    parts.push(nameLabel);
+
+    const nameValue = this.add.text(px + 95, py + 55, this._editNameDraft, {
+      fontSize: '16px', fontFamily: 'monospace', color: '#f5fcff',
+      backgroundColor: '#123047', padding: { x: 10, y: 5 },
+    }).setDepth(302);
+    parts.push(nameValue);
+
+    const btnName = this._makeBtn(px + panelW - 92, py + 66, 'CAMBIAR', '#245071', '#32709f').setDepth(302);
+    btnName.setScale(0.86);
+    btnName.on('pointerdown', (_pointer, _lx, _ly, event) => {
+      event?.stopPropagation?.();
+      const next = window.prompt('Nuevo nombre (max 12):', this._editNameDraft);
+      if (!next || !next.trim()) return;
+      this._editNameDraft = next.trim().slice(0, 12);
+      nameValue.setText(this._editNameDraft);
+    });
+    parts.push(btnName);
+
+    const subtitle = this.add.text(CX, py + 102, 'Selecciona personaje', {
+      fontSize: '12px', fontFamily: 'monospace', color: '#8fd8ff',
+    }).setOrigin(0.5).setDepth(302);
+    parts.push(subtitle);
+
+    const cardW = 270;
+    const cardH = 200;
+    const gap = 24;
+    const cardStartX = CX - (cardW * CHARACTER_IDS.length + gap * (CHARACTER_IDS.length - 1)) / 2;
+    const cardY = py + 122;
+
+    const refreshCardStyles = () => {
+      for (const [id, c] of cards) {
+        const selected = id === this._editCharacterDraft;
+        c.bg.clear();
+        c.bg.fillStyle(selected ? 0x194564 : 0x122a41, 0.96);
+        c.bg.fillRoundedRect(c.x, c.y, cardW, cardH, 10);
+        c.bg.lineStyle(2, selected ? 0x8ff7ff : 0x2d7ea2, selected ? 1 : 0.6);
+        c.bg.strokeRoundedRect(c.x, c.y, cardW, cardH, 10);
+      }
+    };
+
+    CHARACTER_IDS.forEach((id, idx) => {
+      const x = cardStartX + idx * (cardW + gap);
+      const y = cardY;
+      const def = CHARACTER_DEFS[id];
+
+      const bg = this.add.graphics().setDepth(302);
+      parts.push(bg);
+
+      const zone = this.add.zone(x + cardW / 2, y + cardH / 2, cardW, cardH)
+        .setDepth(303)
+        .setInteractive({ useHandCursor: true });
+      zone.on('pointerdown', (_pointer, _lx, _ly, event) => {
+        event?.stopPropagation?.();
+        this._editCharacterDraft = id;
+        refreshCardStyles();
+      });
+      parts.push(zone);
+
+      const nameTxt = this.add.text(x + cardW / 2, y + 14, def.label.toUpperCase(), {
+        fontSize: '16px', fontFamily: 'monospace', color: '#e8f7ff',
+      }).setOrigin(0.5, 0).setDepth(303);
+      parts.push(nameTxt);
+
+      const idleSpriteKey = def.idle?.down;
+      const sprite = this.add.sprite(x + cardW / 2, y + 78, idleSpriteKey).setDepth(303);
+      const src = this.textures.get(idleSpriteKey)?.getSourceImage?.();
+      const h = src?.height || 125;
+      sprite.setScale(64 / h);
+      parts.push(sprite);
+
+      const abilityName = this.add.text(x + 12, y + 120, def.abilityName, {
+        fontSize: '12px', fontFamily: 'monospace', color: '#9de5ff',
+      }).setDepth(303);
+      parts.push(abilityName);
+
+      const abilityDesc = this.add.text(x + 12, y + 142, def.abilityDesc, {
+        fontSize: '10px', fontFamily: 'monospace', color: '#c8e8ff',
+        wordWrap: { width: cardW - 24 },
+        lineSpacing: 2,
+      }).setDepth(303);
+      parts.push(abilityDesc);
+
+      cards.set(id, { bg, x, y });
+    });
+
+    refreshCardStyles();
+
+    const btnCancel = this._makeBtn(CX - 94, py + panelH - 28, 'CANCELAR', '#534014', '#7b5e1f').setDepth(302);
+    btnCancel.setScale(0.88);
+    btnCancel.on('pointerdown', (_pointer, _lx, _ly, event) => {
+      event?.stopPropagation?.();
+      this._closeEditModal();
+    });
+    parts.push(btnCancel);
+
+    const btnSave = this._makeBtn(CX + 94, py + panelH - 28, 'GUARDAR', '#14533f', '#1f7b5d').setDepth(302);
+    btnSave.setScale(0.88);
+    btnSave.on('pointerdown', (_pointer, _lx, _ly, event) => {
+      event?.stopPropagation?.();
+      const safeName = String(this._editNameDraft || this._playerName || 'Jugador').trim().slice(0, 12) || 'Jugador';
+      const safeCharacterId = normalizeCharacterId(this._editCharacterDraft);
+
+      this._playerName = safeName;
+      this._selectedCharacterId = safeCharacterId;
+      networkManager.playerCharacterId = safeCharacterId;
+      if (this._nameDisplay) this._nameDisplay.setText(safeName);
+
+      if (Array.isArray(networkManager.lastPlayers) && networkManager.lastPlayers.length) {
+        const mine = networkManager.lastPlayers.find(p => p.playerIndex === networkManager.playerIndex);
+        if (mine) {
+          mine.name = safeName;
+          mine.characterId = safeCharacterId;
+        }
+      }
+
+      this._rebuildPlayerCards(networkManager.lastPlayers || []);
+
+      if (networkManager.connected && networkManager.roomCode) {
+        networkManager.updateProfile({
+          name: safeName,
+          characterId: safeCharacterId,
+        });
+        this._setStatus('Actualizando perfil...', '#8fd8ff');
+      } else {
+        this._setStatus('Perfil actualizado localmente', '#8fd8ff');
+      }
+
+      this._closeEditModal();
+    });
+    parts.push(btnSave);
+
+    dim.setInteractive(
+      new Phaser.Geom.Rectangle(0, 0, W, H),
+      Phaser.Geom.Rectangle.Contains,
+    ).on('pointerdown', () => this._closeEditModal());
+
+    this._editModal = { parts, cards, nameValue };
+  }
+
+  _closeEditModal() {
+    if (!this._editModal) return;
+    this._editModal.parts.forEach((p) => p?.destroy?.());
+    this._editModal = null;
   }
 
   _setRoomCode(code) {
@@ -477,6 +670,7 @@ export class LobbyScene extends Phaser.Scene {
       }
 
       const { playerIndex, name } = p;
+      const characterId = normalizeCharacterId(p.characterId || DEFAULT_CHARACTER_ID);
       const pc = PLAYER_COLORS[playerIndex] || PLAYER_COLORS[0];
       const leftChip = this.add.graphics();
       leftChip.fillStyle(pc.main, 0.95);
@@ -496,11 +690,19 @@ export class LobbyScene extends Phaser.Scene {
 
       if (playerIndex === networkManager.playerIndex) {
         this._playerName = displayName;
+        this._selectedCharacterId = characterId;
+        networkManager.playerCharacterId = characterId;
         if (this._nameDisplay) this._nameDisplay.setText(displayName);
       }
 
+      const charTag = this.add.text(CX + 86, y + 12, characterId.toUpperCase(), {
+        fontSize: '9px', fontFamily: 'monospace', color: '#001018',
+        backgroundColor: '#89d5ff', padding: { x: 4, y: 1 },
+      }).setOrigin(0.5);
+      this._playerCards.push(charTag);
+
       if (playerIndex === 0) {
-        const hostTag = this.add.text(CX + 118, y + 12, 'HOST', {
+        const hostTag = this.add.text(CX + 142, y + 12, 'HOST', {
           fontSize: '9px', fontFamily: 'monospace', color: '#03121b',
           backgroundColor: '#7de7ff', padding: { x: 4, y: 1 },
         }).setOrigin(0.5);
@@ -508,19 +710,19 @@ export class LobbyScene extends Phaser.Scene {
       }
 
       if (playerIndex === networkManager.playerIndex) {
-        const meTag = this.add.text(CX + 172, y + 12, 'TU', {
+        const meTag = this.add.text(CX + 192, y + 12, 'TU', {
           fontSize: '9px', fontFamily: 'monospace', color: '#132200',
           backgroundColor: '#d9ff6f', padding: { x: 4, y: 1 },
         }).setOrigin(0.5);
         this._playerCards.push(meTag);
 
-        const renameBtn = this.add.text(CX + 248, y + 12, 'CAMBIAR NOMBRE', {
+        const renameBtn = this.add.text(CX + 248, y + 12, 'EDITAR', {
           fontSize: '9px', fontFamily: 'monospace', color: '#9ef8ff',
           backgroundColor: '#14425c', padding: { x: 6, y: 2 },
         })
           .setOrigin(1, 0.5)
           .setInteractive({ useHandCursor: true })
-          .on('pointerdown', () => this._askRename())
+          .on('pointerdown', () => this._openEditModal())
           .on('pointerover', () => renameBtn.setStyle({ backgroundColor: '#1f6b92', color: '#ffffff' }))
           .on('pointerout', () => renameBtn.setStyle({ backgroundColor: '#14425c', color: '#9ef8ff' }));
         this._playerCards.push(renameBtn);
@@ -581,14 +783,14 @@ export class LobbyScene extends Phaser.Scene {
       networkManager.on('player_left', ({ playerIndex }) => {
         this._setStatus('P' + (playerIndex + 1) + ' abandonó la sala', '#ffaa88');
       }),
-      networkManager.on('game_start', ({ playerCount, seed, playerNames, itemConfig }) => {
+      networkManager.on('game_start', ({ playerCount, seed, playerNames, playerProfiles, itemConfig }) => {
         this._cleanup();
         this.scene.start('GameScene', {
           playerCount, online: true,
           isHost: networkManager.isHost,
           myPlayerIndex: networkManager.playerIndex,
           roomCode: networkManager.roomCode,
-          seed, playerNames, itemConfig,
+          seed, playerNames, playerProfiles, itemConfig,
         });
       }),
       networkManager.on('return_to_lobby', ({ players, playerCount, roomCode }) => {
@@ -612,6 +814,7 @@ export class LobbyScene extends Phaser.Scene {
         this.scene.start('MenuScene');
       }),
       networkManager.on('disconnected', () => {
+        this._closeEditModal();
         this._setStatus('Desconectado del servidor', '#ff6666');
         this._showGroup(this._grpRole,    false);
         this._showGroup(this._grpJoin,    false);
@@ -625,5 +828,9 @@ export class LobbyScene extends Phaser.Scene {
     );
   }
 
-  _cleanup() { this._unsubs.forEach(u => u()); this._unsubs = []; }
+  _cleanup() {
+    this._closeEditModal();
+    this._unsubs.forEach(u => u());
+    this._unsubs = [];
+  }
 }

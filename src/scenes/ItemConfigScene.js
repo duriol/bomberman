@@ -209,7 +209,7 @@ export class ItemConfigScene extends Phaser.Scene {
 
   _registerListeners() {
     this._unsubs.push(
-      networkManager.on('game_start', ({ playerCount, seed, playerNames, itemConfig }) => {
+      networkManager.on('game_start', ({ playerCount, seed, playerNames, playerProfiles, itemConfig }) => {
         this._cleanup();
         this.scene.start('GameScene', {
           playerCount,
@@ -219,6 +219,7 @@ export class ItemConfigScene extends Phaser.Scene {
           roomCode:       networkManager.roomCode,
           seed,
           playerNames,
+          playerProfiles,
           itemConfig,
         });
       }),

@@ -51,6 +51,18 @@ const io = new Server(httpServer, {
 // ── Room storage ──────────────────────────────────────────────────────────────
 // Map<roomCode, { host: socketId, players: [{socketId, playerIndex}], started }>
 const rooms = new Map();
+const ALLOWED_CHARACTER_IDS = new Set(['wolf', 'bomby']);
+
+function sanitizeName(name, fallback = 'Jugador') {
+  const safe = String(name || '').trim().slice(0, 12);
+  if (safe) return safe;
+  return String(fallback || 'Jugador').trim().slice(0, 12) || 'Jugador';
+}
+
+function sanitizeCharacterId(characterId) {
+  const id = String(characterId || '').trim().toLowerCase();
+  return ALLOWED_CHARACTER_IDS.has(id) ? id : 'wolf';
+}
 
 function makeCode() {
   return Math.random().toString(36).slice(2, 7).toUpperCase();
@@ -61,7 +73,11 @@ function roomInfo(code) {
   if (!room) return null;
   return {
     roomCode:    code,
-    players:     room.players.map(p => ({ playerIndex: p.playerIndex, name: p.name || ('Jugador ' + (p.playerIndex + 1)) })),
+    players:     room.players.map(p => ({
+      playerIndex: p.playerIndex,
+      name: p.name || ('Jugador ' + (p.playerIndex + 1)),
+      characterId: sanitizeCharacterId(p.characterId),
+    })),
     playerCount: room.players.length,
     started:     room.started,
   };
@@ -106,16 +122,22 @@ io.on('connection', (socket) => {
   console.log('[+]', socket.id);
 
   // ── Create room ────────────────────────────────────────────────────────────
-  socket.on('create_room', ({ name } = {}) => {
+  socket.on('create_room', ({ name, characterId } = {}) => {
     leaveRoom(socket);
 
     let code;
     do { code = makeCode(); } while (rooms.has(code));
 
-    const safeName = String(name || 'Jugador 1').slice(0, 12);
+    const safeName = sanitizeName(name, 'Jugador 1');
+    const safeCharacterId = sanitizeCharacterId(characterId);
     rooms.set(code, {
       host:    socket.id,
-      players: [{ socketId: socket.id, playerIndex: 0, name: safeName }],
+      players: [{
+        socketId: socket.id,
+        playerIndex: 0,
+        name: safeName,
+        characterId: safeCharacterId,
+      }],
       started: false,
     });
 
@@ -125,7 +147,7 @@ io.on('connection', (socket) => {
   });
 
   // ── Join room ──────────────────────────────────────────────────────────────
-  socket.on('join_room', ({ roomCode, name }) => {
+  socket.on('join_room', ({ roomCode, name, characterId }) => {
     const code = (roomCode || '').toUpperCase().trim();
     const room = rooms.get(code);
 
@@ -136,8 +158,14 @@ io.on('connection', (socket) => {
     leaveRoom(socket);
 
     const playerIndex = room.players.length;
-    const safeName = String(name || ('Jugador ' + (playerIndex + 1))).slice(0, 12);
-    room.players.push({ socketId: socket.id, playerIndex, name: safeName });
+    const safeName = sanitizeName(name, 'Jugador ' + (playerIndex + 1));
+    const safeCharacterId = sanitizeCharacterId(characterId);
+    room.players.push({
+      socketId: socket.id,
+      playerIndex,
+      name: safeName,
+      characterId: safeCharacterId,
+    });
     socket.join(code);
     socket.emit('room_joined', { roomCode: code, playerIndex });
     io.to(code).emit('room_update', roomInfo(code));
@@ -151,7 +179,11 @@ io.on('connection', (socket) => {
 
     room.started = true;
     const seed = (Math.random() * 0xFFFFFFFF) >>> 0;
-    const playerNames = room.players.map(p => p.name || ('Jugador ' + (p.playerIndex + 1)));
+    const playerProfiles = room.players.map(p => ({
+      name: p.name || ('Jugador ' + (p.playerIndex + 1)),
+      characterId: sanitizeCharacterId(p.characterId),
+    }));
+    const playerNames = playerProfiles.map(p => p.name);
 
     // Sanitise itemConfig: values must be non-negative integers, total capped at 30
     const safeConfig = {};
@@ -176,6 +208,7 @@ io.on('connection', (socket) => {
       playerCount: room.players.length,
       seed,
       playerNames,
+      playerProfiles,
       itemConfig: safeConfig,
     });
   });
@@ -217,6 +250,36 @@ io.on('connection', (socket) => {
     const safeName = String(name || '').trim().slice(0, 12);
     if (!safeName) return;
     player.name = safeName;
+    io.to(code).emit('room_update', roomInfo(code));
+  });
+
+  // ── Update full profile (name + character) ─────────────────────────────
+  socket.on('update_profile', ({ roomCode, name, characterId } = {}) => {
+    let code = String(roomCode || '').toUpperCase().trim();
+    let room = code ? rooms.get(code) : null;
+    if (!room) {
+      const found = findRoomOf(socket.id);
+      if (!found) return;
+      code = found.code;
+      room = found.room;
+    }
+
+    const player = room.players.find(p => p.socketId === socket.id);
+    if (!player) return;
+
+    let changed = false;
+    const safeName = String(name || '').trim().slice(0, 12);
+    if (safeName) {
+      player.name = safeName;
+      changed = true;
+    }
+
+    if (characterId !== undefined) {
+      player.characterId = sanitizeCharacterId(characterId);
+      changed = true;
+    }
+
+    if (!changed) return;
     io.to(code).emit('room_update', roomInfo(code));
   });
 

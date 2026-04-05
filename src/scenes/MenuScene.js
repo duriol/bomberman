@@ -1,4 +1,9 @@
-import { PLAYER_COLORS } from '../data/constants.js';
+import {
+  PLAYER_COLORS,
+  DEFAULT_CHARACTER_ID,
+  CHARACTER_DEFS,
+} from '../data/constants.js';
+import { preloadCharacterSets, normalizeCharacterId } from '../utils/CharacterAssets.js';
 
 /**
  * MenuScene - online-first home screen.
@@ -8,9 +13,18 @@ export class MenuScene extends Phaser.Scene {
     super({ key: 'MenuScene' });
   }
 
+  preload() {
+    preloadCharacterSets(this);
+  }
+
   create() {
     const { width, height } = this.scale;
     const cx = width / 2;
+
+    this._localProfiles = [
+      { name: 'Jugador 1', characterId: DEFAULT_CHARACTER_ID },
+      { name: 'Jugador 2', characterId: 'bomby' },
+    ];
 
     this._drawBackground(width, height);
     this._drawHero(cx);
@@ -145,16 +159,14 @@ export class MenuScene extends Phaser.Scene {
       padding: { x: 6, y: 2 },
     }).setOrigin(0.5, 0);
 
-    this.add.text(cx, box.y + 41, 'Para jugar rapido en el mismo teclado.', {
+    this.add.text(cx, box.y + 41, 'Para pruebas locales: 2 jugadores fijos con perfil editable.', {
       fontSize: '10px',
       fontFamily: 'monospace',
       color: '#7e90ad',
     }).setOrigin(0.5, 0);
 
     this._playerCount = 2;
-    this._countText = null;
-    this._buildPlayerSelector(cx, box.y + 88);
-    this._buildPlayerCards(cx, box.y + 156);
+    this._buildPlayerCards(cx, box.y + 84);
     this._buildStartButton(cx, box.y + 254);
     this._buildControlsHint(cx, Math.min(height - 12, box.y + 278));
   }
@@ -209,15 +221,18 @@ export class MenuScene extends Phaser.Scene {
 
   _rebuildCards() {
     this._cardContainer.removeAll(true);
-    const cardW = 104;
-    const cardH = 74;
-    const gap = 10;
-    const total = this._playerCount;
+    const cardW = 226;
+    const cardH = 142;
+    const gap = 14;
+    const total = 2;
     const totalW = total * cardW + (total - 1) * gap;
     const startX = -totalW / 2 + cardW / 2;
 
     for (let i = 0; i < total; i++) {
       const pc = PLAYER_COLORS[i];
+      const profile = this._localProfiles[i] || { name: `Jugador ${i + 1}`, characterId: DEFAULT_CHARACTER_ID };
+      const characterId = normalizeCharacterId(profile.characterId);
+      const character = CHARACTER_DEFS[characterId];
       const x = startX + i * (cardW + gap);
 
       const g = this.add.graphics();
@@ -228,24 +243,79 @@ export class MenuScene extends Phaser.Scene {
       g.lineStyle(2, 0xd9f2ff, 0.65);
       g.strokeRoundedRect(x - cardW / 2, 0, cardW, cardH, 8);
 
-      const label = this.add.text(x, 16, `P${i + 1}`, {
-        fontSize: '18px',
+      const label = this.add.text(x - 92, 16, `P${i + 1}`, {
+        fontSize: '16px',
         fontFamily: 'monospace',
         color: '#ffffff',
         stroke: '#000000',
         strokeThickness: 3,
-      }).setOrigin(0.5);
+      }).setOrigin(0, 0.5);
 
-      const controls = this.add.text(x, 47, pc.keys, {
-        fontSize: '8px',
+      const name = this.add.text(x - 92, 40, String(profile.name || `Jugador ${i + 1}`).slice(0, 12), {
+        fontSize: '12px',
+        fontFamily: 'monospace',
+        color: '#f6fcff',
+      }).setOrigin(0, 0.5);
+
+      const charTag = this.add.text(x - 92, 60, `Personaje: ${character.label}`, {
+        fontSize: '10px',
+        fontFamily: 'monospace',
+        color: '#9ad6ff',
+      }).setOrigin(0, 0.5);
+
+      const controlsText = i === 0
+        ? 'Mover: WASD  |  Acciones: 1(J) 2(K) 3(H) 4(U)'
+        : 'Mover: Flechas  |  Acciones: 1(;) 2(\') 3(L) 4(P)';
+      const controls = this.add.text(x - 92, 84, controlsText, {
+        fontSize: '9px',
         fontFamily: 'monospace',
         color: '#eef5ff',
-        wordWrap: { width: cardW - 8 },
-        align: 'center',
-      }).setOrigin(0.5);
+        wordWrap: { width: 168 },
+      }).setOrigin(0, 0.5);
 
-      this._cardContainer.add([g, label, controls]);
+      const sprite = this.add.sprite(x + 76, 50, character.idle.down).setOrigin(0.5);
+      const src = this.textures.get(character.idle.down)?.getSourceImage?.();
+      const h = src?.height || 125;
+      sprite.setScale(56 / h);
+
+      const editBtn = this.add.text(x + 72, 112, 'EDITAR', {
+        fontSize: '11px',
+        fontFamily: 'monospace',
+        color: '#dff8ff',
+        backgroundColor: '#2a4968',
+        padding: { x: 8, y: 4 },
+      })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => this._editLocalProfile(i))
+        .on('pointerover', () => editBtn.setStyle({ backgroundColor: '#3d6790' }))
+        .on('pointerout', () => editBtn.setStyle({ backgroundColor: '#2a4968' }));
+
+      this._cardContainer.add([g, label, name, charTag, controls, sprite, editBtn]);
     }
+  }
+
+  _editLocalProfile(playerIndex) {
+    const current = this._localProfiles[playerIndex] || {
+      name: `Jugador ${playerIndex + 1}`,
+      characterId: DEFAULT_CHARACTER_ID,
+    };
+
+    const nextName = window.prompt('Nombre local (max 12):', current.name || `Jugador ${playerIndex + 1}`);
+    if (nextName && nextName.trim()) {
+      current.name = nextName.trim().slice(0, 12);
+    }
+
+    const nextCharacter = window.prompt(
+      'Personaje local (wolf o bomby):',
+      current.characterId || DEFAULT_CHARACTER_ID,
+    );
+    if (nextCharacter && nextCharacter.trim()) {
+      current.characterId = normalizeCharacterId(nextCharacter);
+    }
+
+    this._localProfiles[playerIndex] = current;
+    this._rebuildCards();
   }
 
   _buildStartButton(cx, y) {
@@ -270,7 +340,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   _buildControlsHint(cx, y) {
-    this.add.text(cx, y, 'Controles locales en tarjetas | Recomendado: jugar online desde el lobby', {
+    this.add.text(cx, y, 'Local prueba: 2 jugadores | Perfil editable por tarjeta | Online sigue siendo prioritario', {
       fontSize: '9px',
       fontFamily: 'monospace',
       color: '#617998',
@@ -331,7 +401,7 @@ export class MenuScene extends Phaser.Scene {
       { icon: '💣', name: 'Bomba extra', desc: 'Permite colocar\nuna bomba mas (max 6)', key: 'Automatico' },
       { icon: '🔥', name: 'Fuego', desc: 'Aumenta el alcance\nde la explosion', key: 'Automatico' },
       { icon: '⚡', name: 'Velocidad', desc: 'Aumenta la\nvelocidad', key: 'Automatico' },
-      { icon: '💥', name: 'Multi-bomba', desc: 'Pone todas tus bombas en la direccion que miras', key: 'E / Shift / U' },
+      { icon: '💥', name: 'Multi-bomba', desc: 'Pone todas tus bombas en la direccion que miras', key: 'Accion 3 (H / L)' },
       { icon: '👟', name: 'Patada', desc: 'Patea bombas al\npasar junto a ellas', key: 'Automatico' },
       { icon: '💀', name: 'Maldicion', desc: 'Movimiento aleatorio\ndurante 10 seg', key: 'Trampa' },
       { icon: '🌀', name: 'Enganche', desc: 'Al moverte saldras\ndisparado hasta la pared', key: 'Trampa' },
@@ -364,7 +434,13 @@ export class MenuScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5, 0));
 
-    container.add(this.add.text(width / 2, py + 46, 'Accion por jugador: P1 E | P2 Shift | P3 O | P4 Num+ | P5 Y', {
+    container.add(this.add.text(width / 2, py + 46, 'Acciones: 1 habilidad, 2 bomba, 3 item, 4 reservado', {
+      fontSize: '9px',
+      fontFamily: 'monospace',
+      color: '#6f9eb9',
+    }).setOrigin(0.5, 0));
+
+    container.add(this.add.text(width / 2, py + 58, 'P1: J/K/H/U | P2: ;/\'/L/P | Movil: 1 abajo, 2 derecha, 3 izquierda, 4 arriba', {
       fontSize: '9px',
       fontFamily: 'monospace',
       color: '#6f9eb9',
@@ -373,7 +449,7 @@ export class MenuScene extends Phaser.Scene {
     const cols = 2;
     const cellW = (panelW - 32) / cols;
     const cellH = 68;
-    const gridTop = py + 72;
+    const gridTop = py + 86;
 
     ITEMS.forEach((item, idx) => {
       const col = idx % cols;
@@ -431,6 +507,9 @@ export class MenuScene extends Phaser.Scene {
   }
 
   _startGame() {
-    this.scene.start('GameScene', { playerCount: this._playerCount });
+    this.scene.start('GameScene', {
+      playerCount: 2,
+      playerProfiles: this._localProfiles,
+    });
   }
 }

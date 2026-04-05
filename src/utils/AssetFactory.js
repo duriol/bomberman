@@ -137,6 +137,11 @@ function generatePlayers(scene) {
 // ── Bomb ─────────────────────────────────────────────────────────────────────
 
 function generateBomb(scene) {
+  _drawBombTexture(scene, 'bomb', 0x111111, 0x555555, 0xffff00, 0xff8800);
+  _drawBombTexture(scene, 'bomb_bomby', 0x7a0f17, 0xff6070, 0xffee00, 0xff3300);
+}
+
+function _drawBombTexture(scene, textureKey, bodyColor, shineColor, sparkOuter, sparkInner) {
   const g = scene.make.graphics({ x: 0, y: 0, add: false });
 
   // Shadow
@@ -144,11 +149,11 @@ function generateBomb(scene) {
   g.fillEllipse(T / 2, T - 6, T * 0.7, 10);
 
   // Body
-  g.fillStyle(0x111111);
+  g.fillStyle(bodyColor);
   g.fillCircle(T / 2, T / 2 - 2, T / 2 - 8);
 
   // Shine
-  g.fillStyle(0x555555);
+  g.fillStyle(shineColor);
   g.fillCircle(T / 2 - 5, T / 2 - 8, 6);
 
   // Fuse
@@ -159,12 +164,12 @@ function generateBomb(scene) {
   g.strokePath();
 
   // Spark
-  g.fillStyle(0xffff00);
+  g.fillStyle(sparkOuter);
   g.fillCircle(T / 2 + 5, T / 2 - (T / 2 - 4), 3);
-  g.fillStyle(0xff8800);
+  g.fillStyle(sparkInner);
   g.fillCircle(T / 2 + 5, T / 2 - (T / 2 - 4), 2);
 
-  g.generateTexture('bomb', T, T);
+  g.generateTexture(textureKey, T, T);
   g.destroy();
 }
 

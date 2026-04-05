@@ -2,6 +2,7 @@ import {
   TILE_SIZE, TILE, MAP_COLS, MAP_ROWS,
   GAME_WIDTH, GAME_HEIGHT, HUD_HEIGHT, CANVAS_HEIGHT,
   PLAYER_COLORS, SPAWN_POSITIONS, RESPAWN_DELAY,
+  DEFAULT_CHARACTER_ID,
 } from '../data/constants.js';
 import { generateMap, createRng, tileToPixel } from '../utils/MapGenerator.js';
 import { generateAssets } from '../utils/AssetFactory.js';
@@ -12,6 +13,7 @@ import { InputManager } from '../systems/InputManager.js';
 import { audioManager } from '../systems/AudioManager.js';
 import { networkManager } from '../systems/NetworkManager.js';
 import { EXPLOSION_DURATION } from '../data/constants.js';
+import { preloadCharacterSets, normalizeCharacterId } from '../utils/CharacterAssets.js';
 
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -27,45 +29,20 @@ export class GameScene extends Phaser.Scene {
     this._seed            = data.seed           ?? null;
     this._itemConfig      = data.itemConfig     ?? null;
     this._playerNames     = Array.isArray(data.playerNames) ? data.playerNames : [];
+    this._playerProfiles  = Array.isArray(data.playerProfiles) ? data.playerProfiles : [];
+    if (!this._playerProfiles.length && this._playerNames.length) {
+      this._playerProfiles = this._playerNames.map((name) => ({
+        name,
+        characterId: DEFAULT_CHARACTER_ID,
+      }));
+    }
     this._unsubs          = [];
     this._goingToLobby    = false;
     this._pendingLobbyData = null;
   }
 
   preload() {
-    const envBase = import.meta.env.BASE_URL || '/';
-    let runtimeBase = new URL('.', window.location.href).pathname;
-    if (runtimeBase === '/' && window.location.pathname && window.location.pathname !== '/') {
-      runtimeBase = window.location.pathname.endsWith('/')
-        ? window.location.pathname
-        : `${window.location.pathname}/`;
-    }
-    const baseUrl = (envBase === '/' && runtimeBase !== '/') ? runtimeBase : envBase;
-    const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-    const wolfBase = `${normalizedBase}assets/sprites/wolf`;
-    const wolfFrames = [
-      'wolf_idle_down',
-      'wolf_idle_right',
-      'wolf_idle_up',
-      'wolf_walk_down_1',
-      'wolf_walk_down_2',
-      'wolf_walk_down_3',
-      'wolf_walk_down_4',
-      'wolf_walk_right_1',
-      'wolf_walk_right_2',
-      'wolf_walk_right_3',
-      'wolf_walk_right_4',
-      'wolf_walk_right_5',
-      'wolf_walk_right_6',
-      'wolf_walk_up_1',
-      'wolf_walk_up_2',
-      'wolf_walk_up_3',
-      'wolf_walk_up_4',
-    ];
-
-    wolfFrames.forEach((key) => {
-      this.load.image(key, `${wolfBase}/${key}.png`);
-    });
+    preloadCharacterSets(this);
   }
 
   create() {
@@ -91,7 +68,7 @@ export class GameScene extends Phaser.Scene {
 
     // Online client: bomb sprites managed separately (no timer logic)
     if (this.isOnlineClient) {
-      this._clientBombSprites = new Map(); // key: 'col,row' → sprite
+      this._clientBombSprites = new Map(); // key: 'col,row' → { sprite, textureKey }
       this._pendingState = null;
     }
 
@@ -117,7 +94,9 @@ export class GameScene extends Phaser.Scene {
         for (const player of this.players) {
           if (!player.alive) continue;
           const pt = player.tilePos;
-          if (pt.col === col && pt.row === row) dying.push(player);
+          if (pt.col !== col || pt.row !== row) continue;
+          if (owner && player.isImmuneToExplosion?.(owner)) continue;
+          dying.push(player);
         }
         for (const player of dying) player.die();
         for (const player of dying) this._scheduleRespawn(player);
@@ -139,13 +118,32 @@ export class GameScene extends Phaser.Scene {
     // ── Players ──────────────────────────────────────────────────────────────
     this.players = [];
     for (let i = 0; i < this.playerCount; i++) {
-      const safeName = String(this._playerNames[i] || `P${i + 1}`).trim().slice(0, 12) || `P${i + 1}`;
-      const p = new Player(this, i, this.map, this.bombManager, safeName);
+      const profile = this._playerProfiles[i] || {
+        name: this._playerNames[i] || `P${i + 1}`,
+        characterId: DEFAULT_CHARACTER_ID,
+      };
+      const safeProfile = {
+        name: String(profile.name || `P${i + 1}`).trim().slice(0, 12) || `P${i + 1}`,
+        characterId: normalizeCharacterId(profile.characterId),
+      };
+      const p = new Player(this, i, this.map, this.bombManager, safeProfile);
       this.players.push(p);
       // Online host: hook player events into event buffer
       if (this.isOnlineHost) {
         p.onEvent = (ev) => this._eventBuffer.push(ev);
       }
+    }
+
+    // Character duplicate visual filter: only activate when there are repeated picks.
+    const byCharacter = new Map();
+    for (const p of this.players) {
+      const n = byCharacter.get(p.characterId) || 0;
+      byCharacter.set(p.characterId, n + 1);
+    }
+    for (const p of this.players) {
+      const hasDuplicate = (byCharacter.get(p.characterId) || 0) > 1;
+      const color = PLAYER_COLORS[p.index % PLAYER_COLORS.length]?.main;
+      p.setDuplicateFilter(hasDuplicate, color);
     }
 
     // ── HUD ──────────────────────────────────────────────────────────────────
@@ -174,8 +172,13 @@ export class GameScene extends Phaser.Scene {
           // Latch one-shot flags: keep true until the host update loop consumes them
           this._remoteInputs[playerIndex] = {
             ...inputs,
-            bombJust:   inputs.bombJust   || !!prev.bombJust,
-            actionJust: inputs.actionJust || !!prev.actionJust,
+            action1Just: inputs.action1Just || !!prev.action1Just,
+            action2Just: inputs.action2Just || !!prev.action2Just,
+            action3Just: inputs.action3Just || !!prev.action3Just,
+            action4Just: inputs.action4Just || !!prev.action4Just,
+            // legacy aliases for compatibility with transitional clients
+            bombJust:   inputs.bombJust   || !!prev.bombJust || inputs.action2Just,
+            actionJust: inputs.actionJust || !!prev.actionJust || inputs.action3Just,
             kx:         inputs.kx || prev.kx || 0,
             ky:         inputs.ky || prev.ky || 0,
             // Preserve both tile coordinates while a kick is latched.
@@ -293,25 +296,32 @@ export class GameScene extends Phaser.Scene {
         color: '#ffffff',
       }).setDepth(51);
 
+      const player = this.players[i];
+      const charLabel = String(player?.characterId || DEFAULT_CHARACTER_ID).toUpperCase();
+      const charText = this.add.text(x + 48, y, charLabel, {
+        fontSize: '9px', fontFamily: 'monospace',
+        color: '#9ad6ff',
+      }).setDepth(51);
+
       // Lives
-      const livesText = this.add.text(x, y + 18, '♥♥♥', {
+      const livesText = this.add.text(x, y + 30, '♥♥♥', {
         fontSize: '12px', fontFamily: 'monospace',
         color: '#ff4466',
       }).setDepth(51);
 
       // Bombs
-      const bombText = this.add.text(x + 50, y + 18, '💣1', {
+      const bombText = this.add.text(x + 50, y + 30, '💣1', {
         fontSize: '11px', fontFamily: 'monospace',
         color: '#ffdd00',
       }).setDepth(51);
 
       // Range
-      const rangeText = this.add.text(x + 85, y + 18, '🔥2', {
+      const rangeText = this.add.text(x + 85, y + 30, '🔥2', {
         fontSize: '11px', fontFamily: 'monospace',
         color: '#ff8800',
       }).setDepth(51);
 
-      this._hudEntries.push({ livesText, bombText, rangeText });
+      this._hudEntries.push({ livesText, bombText, rangeText, charText });
     }
 
     // Round timer
@@ -523,6 +533,10 @@ export class GameScene extends Phaser.Scene {
         mv:          myPlayer ? ((Math.abs(myPlayer._lastMoveVx || 0) > 0.01 || Math.abs(myPlayer._lastMoveVy || 0) > 0.01) ? 1 : 0) : 0,
         mvx:         myPlayer ? (myPlayer._lastMoveVx || 0) : 0,
         mvy:         myPlayer ? (myPlayer._lastMoveVy || 0) : 0,
+        action1Just: myInput.action1Just,
+        action2Just: myInput.action2Just,
+        action3Just: myInput.action3Just,
+        action4Just: myInput.action4Just,
         bombJust:    myInput.bombJust,
         actionJust:  myInput.actionJust,
         fac:         myPlayer ? myPlayer._facing : 'down',
@@ -566,6 +580,10 @@ export class GameScene extends Phaser.Scene {
             const stored = this._remoteInputs[i];
             input = stored ? { ...stored } : null;
             if (stored) {
+              stored.action1Just = false;
+              stored.action2Just = false;
+              stored.action3Just = false;
+              stored.action4Just = false;
               stored.bombJust = false;
               stored.actionJust = false;
               stored.kx = 0;
@@ -639,13 +657,13 @@ export class GameScene extends Phaser.Scene {
       { icon: '💣', name: 'Bomba extra',    desc: '+1 bomba activa (máx 6)',   key: 'auto'          },
       { icon: '🔥', name: 'Fuego',          desc: '+1 alcance explosión',      key: 'auto'          },
       { icon: '⚡', name: 'Velocidad',      desc: '+velocidad',                key: 'auto'          },
-      { icon: '💥', name: 'Multi-bomba',    desc: 'Bombas en la dirección que miras', key: 'E/Shift/U/0/Y' },
+      { icon: '💥', name: 'Multi-bomba',    desc: 'Bombas en la dirección que miras', key: '3 (H / L / botón 3)' },
       { icon: '👟', name: 'Patada',         desc: 'Patea bombas al pasar',     key: 'auto'          },
       { icon: '💀', name: 'Maldición',      desc: 'Movimiento aleatorio 10s',  key: '— (trampa)'    },
       { icon: '🌀', name: 'Enganche',       desc: 'Saldrás disparado hasta la pared', key: '— (trampa)'    },
     ];
 
-    const W = 340, H = 310;
+    const W = 340, H = 350;
     const px = (GAME_WIDTH  - W) / 2;
     const py = (CANVAS_HEIGHT - H) / 2 - 20;
     const DEPTH = 90;
@@ -664,13 +682,23 @@ export class GameScene extends Phaser.Scene {
     panel.strokeRoundedRect(px, py, W, H, 12);
     cont.add(panel);
 
-    cont.add(this.add.text(GAME_WIDTH / 2, py + 14, 'Leyenda de Ítems', {
+    cont.add(this.add.text(GAME_WIDTH / 2, py + 12, 'Leyenda de Ítems', {
       fontSize: '15px', fontFamily: 'monospace',
       color: '#ffdd00', stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5, 0));
 
+    cont.add(this.add.text(GAME_WIDTH / 2, py + 32,
+      'Acciones: 1=habilidad (J/;) | 2=bomba (K/\') | 3=item (H/L) | 4=sin uso (U/P)', {
+        fontSize: '8px', fontFamily: 'monospace', color: '#9bc8e7',
+      }).setOrigin(0.5, 0));
+
+    cont.add(this.add.text(GAME_WIDTH / 2, py + 43,
+      'Móvil: cruz táctil 1 abajo, 2 derecha, 3 izquierda, 4 arriba', {
+        fontSize: '8px', fontFamily: 'monospace', color: '#7eb0d1',
+      }).setOrigin(0.5, 0));
+
     const cellH = 34;
-    const top   = py + 42;
+    const top   = py + 60;
     ITEMS.forEach((item, idx) => {
       const cy = top + idx * cellH;
       const bg = this.add.graphics();
@@ -825,6 +853,8 @@ export class GameScene extends Phaser.Scene {
       pl: this.players.map(p => ({
         x:   Math.round(p.x),
         y:   Math.round(p.y),
+        ch:  p.characterId,
+        bt:  p._bombyTransformed || false,
         vx:  p._lastMoveVx || 0,
         vy:  p._lastMoveVy || 0,
         fd:  p._facing || 'down',
@@ -893,6 +923,9 @@ export class GameScene extends Phaser.Scene {
 
         if (ps.fd) p._facing = ps.fd;
         p._walkFrame = ps.fr || 0;
+        if (p.characterId === 'bomby') {
+          p.setBombyTransformState(!!ps.bt);
+        }
 
         if (i !== this.myPlayerIndex) {
           // Other players: interpolate toward authoritative position
@@ -976,15 +1009,15 @@ export class GameScene extends Phaser.Scene {
         } else if (ps.ra) {
           p.sprite.setTint(0xff6600);
         } else if (ps.al) {
-          if (p._usesWolfSprite) p._restoreBaseTint();
-          else p.sprite.clearTint();
+          p._restoreBaseTint();
         }
       });
     }
 
     // 4. Reconcile bomb sprites (no timer logic — just visual presence)
     if (state.bm) {
-      const newSet = new Set(state.bm.map(b => `${b.col},${b.row}`));
+      const bombTextureByKey = new Map(state.bm.map(b => [`${b.col},${b.row}`, b.tk || 'bomb']));
+      const newSet = new Set([...bombTextureByKey.keys()]);
 
       // Own bombs whose position is no longer in host state have been moved or exploded.
       // Destroy them so their sprite is removed and normal reconcile can create a fresh
@@ -999,9 +1032,9 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      for (const [key, spr] of this._clientBombSprites) {
+      for (const [key, entry] of this._clientBombSprites) {
         if (!newSet.has(key)) {
-          if (spr.active) spr.destroy();
+          if (entry.sprite.active) entry.sprite.destroy();
           this._clientBombSprites.delete(key);
         }
       }
@@ -1040,14 +1073,22 @@ export class GameScene extends Phaser.Scene {
         const key = `${col},${row}`;
         // Own bomb still at this exact position — its sprite is already rendered
         if (this.bombManager.bombs.has(key)) continue;
+        const textureKey = bombTextureByKey.get(key) || 'bomb';
+        const current = this._clientBombSprites.get(key);
+
+        if (current && current.textureKey !== textureKey) {
+          if (current.sprite.active) current.sprite.destroy();
+          this._clientBombSprites.delete(key);
+        }
+
         if (!this._clientBombSprites.has(key)) {
           const pos = tileToPixel(col, row, TILE_SIZE);
-          const spr = this.add.sprite(pos.x, pos.y, 'bomb').setDepth(5);
+          const spr = this.add.sprite(pos.x, pos.y, textureKey).setDepth(5);
           this.tweens.add({
             targets: spr, scaleX: 1.15, scaleY: 1.15,
             duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
           });
-          this._clientBombSprites.set(key, spr);
+          this._clientBombSprites.set(key, { sprite: spr, textureKey });
         }
       }
     }
@@ -1086,5 +1127,16 @@ export class GameScene extends Phaser.Scene {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function _emptyInput() {
-  return { up: false, down: false, left: false, right: false, bombJust: false, actionJust: false };
+  return {
+    up: false,
+    down: false,
+    left: false,
+    right: false,
+    action1Just: false,
+    action2Just: false,
+    action3Just: false,
+    action4Just: false,
+    bombJust: false,
+    actionJust: false,
+  };
 }

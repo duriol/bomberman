@@ -32,12 +32,110 @@ export const ITEM = {
 
 // Player colors (Bomberman 4 style)
 export const PLAYER_COLORS = [
-  { main: 0xffffff, shadow: 0xaaaaaa, label: 'White',  keys: 'WASD+Space'       },
-  { main: 0x111199, shadow: 0x0000aa, label: 'Blue',   keys: 'Arrows+Enter'     },
+  { main: 0xffffff, shadow: 0xaaaaaa, label: 'White',  keys: 'WASD + J/K/H/U'   },
+  { main: 0x111199, shadow: 0x0000aa, label: 'Blue',   keys: "Arrows + ;/'/L/P" },
   { main: 0xcc2222, shadow: 0x880000, label: 'Red',    keys: 'IJKL+U'          },
   { main: 0x22aa22, shadow: 0x007700, label: 'Green',  keys: 'Numpad8456+0'     },
   { main: 0xffaa00, shadow: 0xcc6600, label: 'Yellow', keys: 'TFGH+R'           },
 ];
+
+export const DEFAULT_CHARACTER_ID = 'wolf';
+
+export const CHARACTER_IDS = ['wolf', 'bomby'];
+
+export const CHARACTER_DEFS = {
+  wolf: {
+    id: 'wolf',
+    label: 'Wolf',
+    folder: 'wolf',
+    idle: {
+      down: 'wolf_idle_down',
+      right: 'wolf_idle_right',
+      up: 'wolf_idle_up',
+    },
+    walkBase: {
+      down: 'wolf_walk_down_',
+      right: 'wolf_walk_right_',
+      up: 'wolf_walk_up_',
+    },
+    walkFrames: {
+      down: 4,
+      up: 4,
+      right: 6,
+    },
+    spriteHeight: 125,
+    originY: 0.82,
+    abilityName: 'Traspasar bombas',
+    abilityDesc: 'Wolf puede atravesar bombas como habilidad pasiva.',
+    hasActiveAbility: false,
+    bombTexture: 'bomb',
+  },
+  bomby: {
+    id: 'bomby',
+    label: 'Bomby',
+    folder: 'bomby',
+    idle: {
+      down: 'bomby_idle_down',
+      right: 'bomby_idle_right',
+      up: 'bomby_idle_up',
+    },
+    walkBase: {
+      down: 'bomby_walk_down_',
+      right: 'bomby_walk_right_',
+      up: 'bomby_walk_up_',
+    },
+    walkFrames: {
+      down: 4,
+      up: 4,
+      right: 4,
+    },
+    spriteHeight: 125,
+    originY: 0.82,
+    abilityName: 'Forma bomba',
+    abilityDesc: 'Bomby se vuelve bomba por 3s, explota y regresa sin autodaño.',
+    hasActiveAbility: true,
+    bombTexture: 'bomb_bomby',
+  },
+};
+
+export const ACTION_LAYOUT = {
+  action1: {
+    id: 'action1',
+    number: 1,
+    touchPosition: 'abajo',
+    title: 'Habilidad personaje',
+    desc: 'Activa habilidad especial si el personaje tiene una activa.',
+    p1Key: 'J',
+    p2Key: ';',
+  },
+  action2: {
+    id: 'action2',
+    number: 2,
+    touchPosition: 'derecha',
+    title: 'Poner bomba',
+    desc: 'Coloca una bomba.',
+    p1Key: 'K',
+    p2Key: "'",
+  },
+  action3: {
+    id: 'action3',
+    number: 3,
+    touchPosition: 'izquierda',
+    title: 'Accion de item',
+    desc: 'Activa la accion de item (multi-bomba cuando este disponible).',
+    p1Key: 'H',
+    p2Key: 'L',
+  },
+  action4: {
+    id: 'action4',
+    number: 4,
+    touchPosition: 'arriba',
+    title: 'Reservado',
+    desc: 'Sin uso por ahora.',
+    p1Key: 'U',
+    p2Key: 'P',
+  },
+};
 
 // Default player stats
 export const DEFAULT_PLAYER_STATS = {

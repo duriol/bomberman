@@ -1,14 +1,16 @@
 /**
  * InputManager — maps keyboard keys to actions for up to 5 local players.
  *
- * Each player has: up, down, left, right, bomb, action (remote detonate)
+ * Each player has: up, down, left, right, action1..action4.
  *
  * Controls:
- *  P1: WASD + Space (bomb) + E (action)
- *  P2: Arrow keys + Enter (bomb) + RightShift (action)
- *  P3: IJKL + U (bomb) + O (action)
- *  P4: Numpad 8456 + Numpad0 (bomb) + NumpadDot (action)
- *  P5: TFGH + R (bomb) + Y (action)
+ *  P1: WASD + J(action1) + K(action2) + H(action3) + U(action4)
+ *  P2: Arrows + ;(action1) + '(action2) + L(action3) + P(action4)
+ *
+ * action1 = character ability
+ * action2 = place bomb
+ * action3 = item action (multi-bomb for now)
+ * action4 = reserved (unused)
  */
 export class InputManager {
   constructor(scene) {
@@ -28,8 +30,10 @@ export class InputManager {
         down:   add(KB.KeyCodes.S),
         left:   add(KB.KeyCodes.A),
         right:  add(KB.KeyCodes.D),
-        bomb:   add(KB.KeyCodes.SPACE),
-        action: add(KB.KeyCodes.E),
+        action1: add(KB.KeyCodes.J),
+        action2: add(KB.KeyCodes.K),
+        action3: add(KB.KeyCodes.H),
+        action4: add(KB.KeyCodes.U),
       },
       // Player 1
       {
@@ -37,8 +41,10 @@ export class InputManager {
         down:   add(KB.KeyCodes.DOWN),
         left:   add(KB.KeyCodes.LEFT),
         right:  add(KB.KeyCodes.RIGHT),
-        bomb:   add(KB.KeyCodes.ENTER),
-        action: add(KB.KeyCodes.SHIFT),
+        action1: add(KB.KeyCodes.SEMICOLON),
+        action2: add(KB.KeyCodes.QUOTE),
+        action3: add(KB.KeyCodes.L),
+        action4: add(KB.KeyCodes.P),
       },
       // Player 2
       {
@@ -46,8 +52,10 @@ export class InputManager {
         down:   add(KB.KeyCodes.K),
         left:   add(KB.KeyCodes.J),
         right:  add(KB.KeyCodes.L),
-        bomb:   add(KB.KeyCodes.U),
-        action: add(KB.KeyCodes.O),
+        action1: add(KB.KeyCodes.Y),
+        action2: add(KB.KeyCodes.U),
+        action3: add(KB.KeyCodes.H),
+        action4: add(KB.KeyCodes.J),
       },
       // Player 3 (Numpad)
       {
@@ -55,8 +63,10 @@ export class InputManager {
         down:   add(KB.KeyCodes.NUMPAD_FIVE),
         left:   add(KB.KeyCodes.NUMPAD_FOUR),
         right:  add(KB.KeyCodes.NUMPAD_SIX),
-        bomb:   add(KB.KeyCodes.NUMPAD_ZERO),
-        action: add(KB.KeyCodes.NUMPAD_ADD),
+        action1: add(KB.KeyCodes.NUMPAD_TWO),
+        action2: add(KB.KeyCodes.NUMPAD_SIX),
+        action3: add(KB.KeyCodes.NUMPAD_FOUR),
+        action4: add(KB.KeyCodes.NUMPAD_EIGHT),
       },
       // Player 4
       {
@@ -64,8 +74,10 @@ export class InputManager {
         down:   add(KB.KeyCodes.G),
         left:   add(KB.KeyCodes.F),
         right:  add(KB.KeyCodes.H),
-        bomb:   add(KB.KeyCodes.R),
-        action: add(KB.KeyCodes.Y),
+        action1: add(KB.KeyCodes.V),
+        action2: add(KB.KeyCodes.B),
+        action3: add(KB.KeyCodes.N),
+        action4: add(KB.KeyCodes.M),
       },
     ];
   }
@@ -79,9 +91,15 @@ export class InputManager {
       down:       k.down.isDown,
       left:       k.left.isDown,
       right:      k.right.isDown,
-      bombJust:   Phaser.Input.Keyboard.JustDown(k.bomb),
-      actionJust: Phaser.Input.Keyboard.JustDown(k.action),
+      action1Just: Phaser.Input.Keyboard.JustDown(k.action1),
+      action2Just: Phaser.Input.Keyboard.JustDown(k.action2),
+      action3Just: Phaser.Input.Keyboard.JustDown(k.action3),
+      action4Just: Phaser.Input.Keyboard.JustDown(k.action4),
     };
+
+    // Temporary aliases to keep call sites stable while migration completes.
+    state.bombJust = state.action2Just;
+    state.actionJust = state.action3Just;
 
     // Merge on-screen controls for player 0 (mobile)
     if (playerIndex === 0) {
@@ -98,9 +116,18 @@ export class InputManager {
         }
       }
       if (btns) {
-        state.bombJust   = state.bombJust   || !!btns.bomb;
-        state.actionJust = state.actionJust || !!btns.action;
-        btns.bomb   = false;   // one-shot: consumed this frame
+        state.action1Just = state.action1Just || !!btns.a1;
+        state.action2Just = state.action2Just || !!btns.a2 || !!btns.bomb;
+        state.action3Just = state.action3Just || !!btns.a3 || !!btns.action;
+        state.action4Just = state.action4Just || !!btns.a4;
+        state.bombJust = state.action2Just;
+        state.actionJust = state.action3Just;
+
+        btns.a1 = false;
+        btns.a2 = false;
+        btns.a3 = false;
+        btns.a4 = false;
+        btns.bomb = false;
         btns.action = false;
       }
     }

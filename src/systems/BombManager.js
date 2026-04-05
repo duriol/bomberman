@@ -30,7 +30,7 @@ export function calcExplosionTiles(map, originCol, originRow, range, pierce) {
 }
 
 class Bomb {
-  constructor(scene, col, row, owner, manager) {
+  constructor(scene, col, row, owner, manager, options = {}) {
     this.scene    = scene;
     this.col      = col;
     this.row      = row;
@@ -39,9 +39,11 @@ class Bomb {
     this.exploded = false;
     this.range    = owner.stats.bombRange;
     this.pierce   = owner.stats.pierce;
+    this.textureKey = options.textureKey || 'bomb';
+    this.meta = options.meta || null;
 
     const pos = tileToPixel(col, row, TILE_SIZE);
-    this.sprite = scene.add.sprite(pos.x, pos.y, 'bomb').setDepth(5);
+    this.sprite = scene.add.sprite(pos.x, pos.y, this.textureKey).setDepth(5);
 
     scene.tweens.add({
       targets: this.sprite, scaleX: 1.15, scaleY: 1.15,
@@ -132,9 +134,9 @@ export class BombManager {
     return this.bombs.has(key) || this.remoteBombs.has(key);
   }
 
-  placeBomb(col, row, owner) {
+  placeBomb(col, row, owner, options = {}) {
     if (this.hasBombAt(col, row)) return null;
-    const bomb = new Bomb(this.scene, col, row, owner, this);
+    const bomb = new Bomb(this.scene, col, row, owner, this, options);
     this.bombs.set(`${col},${row}`, bomb);
     return bomb;
   }
@@ -206,7 +208,10 @@ export class BombManager {
 
   serialize() {
     return [...this.bombs.values()].map(b => ({
-      col: b.col, row: b.row, rem: Math.round(b.getRemaining()),
+      col: b.col,
+      row: b.row,
+      rem: Math.round(b.getRemaining()),
+      tk: b.textureKey || 'bomb',
     }));
   }
 

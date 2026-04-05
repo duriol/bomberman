@@ -12,6 +12,7 @@
  *   networkManager.disconnect()
  */
 import { io } from 'socket.io-client';
+import { DEFAULT_CHARACTER_ID } from '../data/constants.js';
 
 class NetworkManager {
   constructor() {
@@ -19,6 +20,7 @@ class NetworkManager {
     this.roomCode    = null;
     this.playerIndex = -1;
     this.playerName  = '';
+    this.playerCharacterId = DEFAULT_CHARACTER_ID;
     this.isHost      = false;
     this.connected   = false;
     this.lastPlayers = [];
@@ -72,7 +74,11 @@ class NetworkManager {
       this.roomCode    = roomCode;
       this.playerIndex = playerIndex;
       this.isHost      = true;
-      this.lastPlayers = [{ playerIndex, name: this.playerName || ('Jugador 1') }];
+      this.lastPlayers = [{
+        playerIndex,
+        name: this.playerName || ('Jugador 1'),
+        characterId: this.playerCharacterId || DEFAULT_CHARACTER_ID,
+      }];
       this._emit('room_created', { roomCode, playerIndex });
     });
 
@@ -85,12 +91,21 @@ class NetworkManager {
 
     s.on('room_error',   msg           => this._emit('room_error', msg));
     s.on('room_update',  info          => {
+      let normalizedInfo = info;
       if (info.players) {
-        this.lastPlayers = info.players;
+        this.lastPlayers = info.players.map(p => ({
+          ...p,
+          characterId: p.characterId || DEFAULT_CHARACTER_ID,
+        }));
+        normalizedInfo = {
+          ...info,
+          players: this.lastPlayers,
+        };
         const me = info.players.find(p => p.playerIndex === this.playerIndex);
         if (me?.name) this.playerName = me.name;
+        if (me?.characterId) this.playerCharacterId = me.characterId;
       }
-      this._emit('room_update', info);
+      this._emit('room_update', normalizedInfo);
     });
     s.on('game_start',   data          => this._emit('game_start', data));
     s.on('game_state',   state         => this._emit('game_state', state));
@@ -99,8 +114,16 @@ class NetworkManager {
     s.on('chat_msg',     data          => this._emit('chat_msg', data));
     s.on('host_left',    ()            => this._emit('host_left', {}));
     s.on('return_to_lobby', data       => {
-      if (data.players) this.lastPlayers = data.players;
-      this._emit('return_to_lobby', data);
+      if (data.players) {
+        this.lastPlayers = data.players.map(p => ({
+          ...p,
+          characterId: p.characterId || DEFAULT_CHARACTER_ID,
+        }));
+      }
+      this._emit('return_to_lobby', {
+        ...data,
+        players: data.players ? this.lastPlayers : data.players,
+      });
     });
     s.on('disconnect', () => {
       this.connected = false;
@@ -124,18 +147,26 @@ class NetworkManager {
   }
 
   // ── Server actions ─────────────────────────────────────────────────────────
-  createRoom(name = '') {
+  createRoom(name = '', characterId = this.playerCharacterId) {
     this._require();
     const safeName = String(name || '').trim().slice(0, 12);
+    const safeCharacterId = String(characterId || DEFAULT_CHARACTER_ID).trim().toLowerCase();
     this.playerName = safeName;
-    this.socket.emit('create_room', { name: safeName });
+    this.playerCharacterId = safeCharacterId || DEFAULT_CHARACTER_ID;
+    this.socket.emit('create_room', { name: safeName, characterId: this.playerCharacterId });
   }
 
-  joinRoom(code, name = '') {
+  joinRoom(code, name = '', characterId = this.playerCharacterId) {
     this._require();
     const safeName = String(name || '').trim().slice(0, 12);
+    const safeCharacterId = String(characterId || DEFAULT_CHARACTER_ID).trim().toLowerCase();
     this.playerName = safeName;
-    this.socket.emit('join_room', { roomCode: code, name: safeName });
+    this.playerCharacterId = safeCharacterId || DEFAULT_CHARACTER_ID;
+    this.socket.emit('join_room', {
+      roomCode: code,
+      name: safeName,
+      characterId: this.playerCharacterId,
+    });
   }
 
   startGame(itemConfig = {}) {
@@ -154,6 +185,23 @@ class NetworkManager {
     if (!safeName) return;
     this.playerName = safeName;
     this.socket.emit('update_name', { roomCode: this.roomCode || '', name: safeName });
+  }
+
+  updateProfile({ name, characterId } = {}) {
+    if (!this.socket || !this.connected) return;
+    const safeName = String(name || '').trim().slice(0, 12);
+    const safeCharacterId = String(characterId || this.playerCharacterId || DEFAULT_CHARACTER_ID)
+      .trim()
+      .toLowerCase();
+
+    if (safeName) this.playerName = safeName;
+    this.playerCharacterId = safeCharacterId || DEFAULT_CHARACTER_ID;
+
+    this.socket.emit('update_profile', {
+      roomCode: this.roomCode || '',
+      name: safeName,
+      characterId: this.playerCharacterId,
+    });
   }
 
   /** Host → all other clients (batched at 20hz by GameScene) */
@@ -179,6 +227,7 @@ class NetworkManager {
     this.roomCode    = null;
     this.playerIndex = -1;
     this.playerName  = '';
+    this.playerCharacterId = DEFAULT_CHARACTER_ID;
     this.isHost      = false;
     this.lastPlayers = [];
     this._handlers   = {};
