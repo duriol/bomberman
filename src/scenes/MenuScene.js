@@ -307,7 +307,7 @@ export class MenuScene extends Phaser.Scene {
     }
 
     const nextCharacter = window.prompt(
-      'Personaje local (wolf o bomby):',
+      'Personaje local (wolf, bomby, bony o will-e):',
       current.characterId || DEFAULT_CHARACTER_ID,
     );
     if (nextCharacter && nextCharacter.trim()) {

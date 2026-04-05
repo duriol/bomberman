@@ -15,6 +15,9 @@ import { networkManager } from '../systems/NetworkManager.js';
 import { EXPLOSION_DURATION } from '../data/constants.js';
 import { preloadCharacterSets, normalizeCharacterId } from '../utils/CharacterAssets.js';
 
+const WILL_E_MISSILE_TRAVEL_MS = 3000;
+const WILL_E_MISSILE_RANGE = 1;
+
 export class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -39,6 +42,8 @@ export class GameScene extends Phaser.Scene {
     this._unsubs          = [];
     this._goingToLobby    = false;
     this._pendingLobbyData = null;
+    this._willEMissiles = new Map();
+    this._willEMissileSeq = 0;
   }
 
   preload() {
@@ -102,7 +107,9 @@ export class GameScene extends Phaser.Scene {
         for (const player of dying) {
           const wasAlive = player.alive;
           player.die();
-          if (wasAlive && !player.alive) this._dropPlayerInventory(player);
+          if (wasAlive && !player.alive && player.shouldDropInventoryOnDeath?.()) {
+            this._dropPlayerInventory(player);
+          }
         }
         for (const player of dying) this._scheduleRespawn(player);
         // Destroy items on this tile
@@ -400,6 +407,8 @@ export class GameScene extends Phaser.Scene {
   // ─── Respawn & Game Over ───────────────────────────────────────────────────
 
   _scheduleRespawn(player) {
+    if (!player) return;
+    if (player.hasPendingSelfRevive?.()) return;
     if (player.lives <= 0) {
       this._checkRoundEnd();
       return;
@@ -410,10 +419,30 @@ export class GameScene extends Phaser.Scene {
   }
 
   _dropPlayerInventory(player) {
+    if (player?.shouldDropInventoryOnDeath && !player.shouldDropInventoryOnDeath()) return;
     if (!player || !player.extractInventoryDrops) return;
     const drops = player.extractInventoryDrops();
     if (!drops.length) return;
     this.itemManager.dropInventoryItems(drops);
+  }
+
+  _playResurrectionEffect(x, y, isBony = false) {
+    const outerColor = isBony ? 0x9bf6ff : 0x9cff9c;
+    const innerColor = isBony ? 0xdffcff : 0xe5ffe5;
+    const ringA = this.add.circle(x, y, TILE_SIZE * 0.34, outerColor, 0.42).setDepth(19);
+    const ringB = this.add.circle(x, y, TILE_SIZE * 0.22, innerColor, 0.62).setDepth(19);
+
+    this.tweens.add({
+      targets: [ringA, ringB],
+      scale: { from: 0.42, to: 1.85 },
+      alpha: { from: 0.78, to: 0 },
+      duration: 500,
+      ease: 'Cubic.Out',
+      onComplete: () => {
+        ringA.destroy();
+        ringB.destroy();
+      },
+    });
   }
 
   _crushOccupantsInWalls() {
@@ -432,7 +461,9 @@ export class GameScene extends Phaser.Scene {
       const wasAlive = player.alive;
       player.die();
       if (wasAlive && !player.alive) {
-        this._dropPlayerInventory(player);
+        if (player.shouldDropInventoryOnDeath?.()) {
+          this._dropPlayerInventory(player);
+        }
         dying.push(player);
       }
     }
@@ -453,6 +484,7 @@ export class GameScene extends Phaser.Scene {
     this._winnerIndex = winner ? winner.index : -1;
     this._winnerName = winner ? (winner.displayName || `P${winner.index + 1}`) : '';
     this._spiralStarted = false;
+    this._clearWillEMissiles();
     if (this._timerEvent) { this._timerEvent.remove(); this._timerEvent = null; }
     if (this._spiralEvent) { this._spiralEvent.remove(); this._spiralEvent = null; }
     audioManager.stopBGM();
@@ -540,9 +572,206 @@ export class GameScene extends Phaser.Scene {
     this._unsubs.forEach(u => u());
     this._unsubs = [];
     if (this._spiralEvent) { this._spiralEvent.remove(); this._spiralEvent = null; }
+    this._clearWillEMissiles();
     this.inputManager.destroy();
     this.bombManager.destroyAll();
     this.itemManager.destroyAll();
+  }
+
+  // ─── Will-e Ability ───────────────────────────────────────────────────────
+
+  tryLaunchWillEMissile(owner) {
+    if (!owner || owner.characterId !== 'will-e') return false;
+    if (this._gameOver) return false;
+
+    // Online clients are not authoritative for ability effects.
+    if (this.isOnlineClient) return false;
+
+    const rivals = (this.players || []).filter(
+      (p) => p && p !== owner && p.alive && p.sprite?.active,
+    );
+    if (!rivals.length) return false;
+
+    const target = Phaser.Utils.Array.GetRandom(rivals);
+    const { col, row } = target.tilePos;
+    const startX = owner.x;
+    const startY = owner.y;
+    const targetPos = tileToPixel(col, row, TILE_SIZE);
+    const id = `wm_${Math.round(this.time.now)}_${owner.index}_${this._willEMissileSeq++}`;
+
+    this._createWillEMissile({
+      id,
+      ownerIndex: owner.index,
+      startX,
+      startY,
+      targetCol: col,
+      targetRow: row,
+      targetX: targetPos.x,
+      targetY: targetPos.y,
+      durationMs: WILL_E_MISSILE_TRAVEL_MS,
+      resolveImpact: true,
+    });
+
+    if (this.isOnlineHost) {
+      this._eventBuffer.push({
+        t: 'wm_launch',
+        id,
+        pi: owner.index,
+        sx: Math.round(startX),
+        sy: Math.round(startY),
+        tc: col,
+        tr: row,
+        tx: targetPos.x,
+        ty: targetPos.y,
+        ms: WILL_E_MISSILE_TRAVEL_MS,
+      });
+    }
+
+    return true;
+  }
+
+  _createWillEMissile({
+    id,
+    ownerIndex,
+    startX,
+    startY,
+    targetCol,
+    targetRow,
+    targetX,
+    targetY,
+    durationMs = WILL_E_MISSILE_TRAVEL_MS,
+    resolveImpact = false,
+  }) {
+    if (!id || this._willEMissiles.has(id)) return false;
+
+    const warningTile = this.add.rectangle(
+      targetX,
+      targetY,
+      TILE_SIZE - 6,
+      TILE_SIZE - 6,
+      0xff4a2a,
+      0.26,
+    ).setDepth(11);
+    warningTile.setStrokeStyle(2, 0xffcc7a, 0.95);
+
+    const warningText = this.add.text(targetX, targetY, `${Math.ceil(durationMs / 1000)}s`, {
+      fontSize: '16px',
+      fontFamily: 'monospace',
+      color: '#ffe680',
+      stroke: '#3a1000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(12);
+
+    const missileBody = this.add.circle(startX, startY, 6, 0xfff0a8, 1).setDepth(14);
+    const missileCore = this.add.circle(startX, startY, 3, 0xff5a22, 1).setDepth(15);
+
+    const warningPulse = this.tweens.add({
+      targets: warningTile,
+      alpha: { from: 0.2, to: 0.45 },
+      duration: 190,
+      yoyo: true,
+      repeat: -1,
+    });
+    const warningTextPulse = this.tweens.add({
+      targets: warningText,
+      scale: { from: 1, to: 1.16 },
+      duration: 220,
+      yoyo: true,
+      repeat: -1,
+    });
+    const missilePulse = this.tweens.add({
+      targets: missileBody,
+      scale: { from: 0.9, to: 1.1 },
+      duration: 110,
+      yoyo: true,
+      repeat: -1,
+    });
+
+    this._willEMissiles.set(id, {
+      id,
+      ownerIndex,
+      startX,
+      startY,
+      targetCol,
+      targetRow,
+      targetX,
+      targetY,
+      durationMs,
+      elapsedMs: 0,
+      shownSeconds: Math.ceil(durationMs / 1000),
+      resolveImpact,
+      warningTile,
+      warningText,
+      missileBody,
+      missileCore,
+      warningPulse,
+      warningTextPulse,
+      missilePulse,
+    });
+    return true;
+  }
+
+  _updateWillEMissiles(delta) {
+    if (!this._willEMissiles.size) return;
+
+    for (const missile of [...this._willEMissiles.values()]) {
+      missile.elapsedMs += delta;
+
+      const progress = Phaser.Math.Clamp(missile.elapsedMs / missile.durationMs, 0, 1);
+      const eased = Phaser.Math.Easing.Cubic.InOut(progress);
+      const x = Phaser.Math.Linear(missile.startX, missile.targetX, eased);
+      const y = Phaser.Math.Linear(missile.startY, missile.targetY, eased);
+
+      if (missile.missileBody?.active) missile.missileBody.setPosition(x, y);
+      if (missile.missileCore?.active) missile.missileCore.setPosition(x, y);
+
+      const remainingMs = Math.max(0, missile.durationMs - missile.elapsedMs);
+      const secondsLeft = Math.ceil(remainingMs / 1000);
+      if (secondsLeft > 0 && secondsLeft !== missile.shownSeconds && missile.warningText?.active) {
+        missile.shownSeconds = secondsLeft;
+        missile.warningText.setText(`${secondsLeft}s`);
+      }
+
+      if (progress < 1) continue;
+
+      if (missile.resolveImpact && !this.isOnlineClient) {
+        const owner = this.players[missile.ownerIndex] || null;
+        this.bombManager.createExplosion(
+          missile.targetCol,
+          missile.targetRow,
+          WILL_E_MISSILE_RANGE,
+          false,
+          owner,
+        );
+      }
+
+      this._destroyWillEMissile(missile.id);
+    }
+  }
+
+  _destroyWillEMissile(id) {
+    const missile = this._willEMissiles.get(id);
+    if (!missile) return;
+
+    const tweens = [missile.warningPulse, missile.warningTextPulse, missile.missilePulse];
+    for (const tw of tweens) {
+      if (!tw) continue;
+      tw.stop();
+      tw.remove();
+    }
+
+    missile.warningTile?.destroy?.();
+    missile.warningText?.destroy?.();
+    missile.missileBody?.destroy?.();
+    missile.missileCore?.destroy?.();
+
+    this._willEMissiles.delete(id);
+  }
+
+  _clearWillEMissiles() {
+    for (const id of [...this._willEMissiles.keys()]) {
+      this._destroyWillEMissile(id);
+    }
   }
 
   // ─── Update Loop ───────────────────────────────────────────────────────────
@@ -691,6 +920,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    this._updateWillEMissiles(delta);
     this._updateHUD();
   }
 
@@ -860,7 +1090,9 @@ export class GameScene extends Phaser.Scene {
       for (const player of dying) {
         const wasAlive = player.alive;
         player.die();
-        if (wasAlive && !player.alive) this._dropPlayerInventory(player);
+        if (wasAlive && !player.alive && player.shouldDropInventoryOnDeath?.()) {
+          this._dropPlayerInventory(player);
+        }
       }
       for (const player of dying) {
         this._scheduleRespawn(player);
@@ -991,6 +1223,19 @@ export class GameScene extends Phaser.Scene {
           audioManager.playPlayerDeath();
         } else if (ev.t === 'pickup') {
           audioManager.playItemPickup();
+        } else if (ev.t === 'wm_launch') {
+          this._createWillEMissile({
+            id: ev.id,
+            ownerIndex: Number(ev.pi) || 0,
+            startX: Number(ev.sx) || 0,
+            startY: Number(ev.sy) || 0,
+            targetCol: Number(ev.tc) || 0,
+            targetRow: Number(ev.tr) || 0,
+            targetX: Number(ev.tx) || 0,
+            targetY: Number(ev.ty) || 0,
+            durationMs: Math.max(1, Number(ev.ms) || WILL_E_MISSILE_TRAVEL_MS),
+            resolveImpact: false,
+          });
         } else if (ev.t === 'end' && !this._gameOver) {
           this._endRound(ev.wi >= 0 ? this.players[ev.wi] : null);
         }
@@ -1020,6 +1265,11 @@ export class GameScene extends Phaser.Scene {
               p.sprite.setDepth(10);
               p.setOverheadPosition(ps.x, ps.y);
               p.label.setAlpha(1);
+              const invMs = p.characterId === 'bony'
+                ? Math.max(0, Number(p.characterDef?.abilityInvincibleMs || 2000))
+                : 1500;
+              this._playResurrectionEffect(ps.x, ps.y, p.characterId === 'bony');
+              p._activateTemporaryInvincibility?.(invMs);
             }
             if ((ps.vx || 0) !== 0 || (ps.vy || 0) !== 0) {
               p._setWalkTexture();
@@ -1047,7 +1297,7 @@ export class GameScene extends Phaser.Scene {
             p.sprite.setDepth(1);
             p.label.setAlpha(0.3);
           } else if (!p.alive && ps.al) {
-            // Host confirmed respawn — snap to spawn point and flash
+            // Host confirmed respawn — snap to spawn point and apply respawn visuals
             p.sprite.setPosition(ps.x, ps.y);
             p._walkFrame = 0;
             p._setIdleTexture();
@@ -1057,11 +1307,11 @@ export class GameScene extends Phaser.Scene {
             p._restoreBaseTint();
             p.label.setAlpha(1);
             p.setOverheadPosition(ps.x, ps.y);
-            this.tweens.add({
-              targets: p.sprite, alpha: { from: 0.3, to: 1 },
-              duration: 200, repeat: 6, yoyo: true,
-              onComplete: () => { if (p.sprite.active) p.sprite.setAlpha(1); },
-            });
+            const invMs = p.characterId === 'bony'
+              ? Math.max(0, Number(p.characterDef?.abilityInvincibleMs || 2000))
+              : 1500;
+            this._playResurrectionEffect(ps.x, ps.y, p.characterId === 'bony');
+            p._activateTemporaryInvincibility?.(invMs);
           }
           // No position reconciliation — client position is never overridden
         }

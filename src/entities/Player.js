@@ -91,8 +91,13 @@ export class Player {
     this._bombyAbilityBombKey = null;
     this._bombyImmuneBomb = false;
 
+    this._bonyRevivePending = false;
+    this._bonyReviveEvent = null;
+    this._invincibilityTween = null;
+    this._invincibilityClearEvent = null;
+
     this._abilityCooldownMs = Math.max(0, Number(this.characterDef.abilityCooldownMs || 0));
-    this._abilityCooldownRemaining = 0;
+    this._abilityCooldownRemaining = Math.max(0, Number(this.characterDef.abilityInitialCooldownMs || 0));
 
     const fallbackIdle = getCharacterIdleKey(DEFAULT_CHARACTER_ID, 'down');
     const initialIdle = getCharacterIdleKey(this.characterId, 'down');
@@ -218,6 +223,14 @@ export class Player {
     return owner === this && this._bombyImmuneBomb;
   }
 
+  hasPendingSelfRevive() {
+    return this._bonyRevivePending;
+  }
+
+  shouldDropInventoryOnDeath() {
+    return this.characterId !== 'bony';
+  }
+
   _tickAbilityCooldown(delta) {
     if (this._abilityCooldownRemaining <= 0) return;
     this._abilityCooldownRemaining = Math.max(0, this._abilityCooldownRemaining - delta);
@@ -225,10 +238,19 @@ export class Player {
   }
 
   _tryActivateCharacterAbility() {
-    if (this.characterId !== 'bomby') return;
-    if (this._bombyTransformed) return;
+    if (this.characterId !== 'bomby' && this.characterId !== 'will-e') return;
     if (this._abilityCooldownRemaining > 0) return;
     if (!this.alive || !this.sprite.active) return;
+
+    if (this.characterId === 'will-e') {
+      const launched = !!this.scene.tryLaunchWillEMissile?.(this);
+      if (!launched) return;
+      this._abilityCooldownRemaining = this._abilityCooldownMs;
+      this.refreshAbilityStatus();
+      return;
+    }
+
+    if (this._bombyTransformed) return;
 
     const { col, row } = this.tilePos;
     if (this.bombManager.hasBombAt(col, row)) return;
@@ -282,7 +304,8 @@ export class Player {
       const statusKey = `cd:${seconds}`;
       if (statusKey !== this._abilityStatusKey) {
         this._abilityStatusKey = statusKey;
-        this.abilityLabel.setText(`CD ${seconds}s`);
+        const cooldownLabel = this.characterId === 'bony' ? `REVIVE ${seconds}s` : `CD ${seconds}s`;
+        this.abilityLabel.setText(cooldownLabel);
         this.abilityLabel.setStyle({ color: '#ff6666', backgroundColor: '#2a0d0d' });
       }
       return;
@@ -290,7 +313,8 @@ export class Player {
 
     if (this._abilityStatusKey !== 'ready') {
       this._abilityStatusKey = 'ready';
-      this.abilityLabel.setText('LISTA');
+      const readyLabel = this.characterId === 'bony' ? 'REVIVE LISTA' : 'LISTA';
+      this.abilityLabel.setText(readyLabel);
       this.abilityLabel.setStyle({ color: '#66ff9c', backgroundColor: '#0d2a18' });
     }
   }
@@ -828,6 +852,121 @@ export class Player {
     }
   }
 
+  _stopInvincibilityVisual() {
+    if (this._invincibilityTween) {
+      this._invincibilityTween.stop();
+      this._invincibilityTween.remove();
+      this._invincibilityTween = null;
+    }
+    if (this._invincibilityClearEvent) {
+      this._invincibilityClearEvent.remove(false);
+      this._invincibilityClearEvent = null;
+    }
+    if (this.sprite?.active) this.sprite.setAlpha(1);
+  }
+
+  _activateTemporaryInvincibility(durationMs) {
+    const ms = Math.max(0, Number(durationMs) || 0);
+    if (ms <= 0) {
+      this.respawnInvincible = false;
+      this._stopInvincibilityVisual();
+      return;
+    }
+
+    this.respawnInvincible = true;
+    this._stopInvincibilityVisual();
+
+    this._invincibilityTween = this.scene.tweens.add({
+      targets: this.sprite,
+      alpha: { from: 0.35, to: 1 },
+      duration: 150,
+      yoyo: true,
+      repeat: -1,
+    });
+
+    this._invincibilityClearEvent = this.scene.time.delayedCall(ms, () => {
+      this.respawnInvincible = false;
+      this._stopInvincibilityVisual();
+      this._restoreBaseTint();
+    });
+  }
+
+  _playBonyResurrectionEffect() {
+    const pulse = this.scene.add.circle(this.x, this.y, TILE_SIZE * 0.32, 0x9bf6ff, 0.4).setDepth(19);
+    const pulse2 = this.scene.add.circle(this.x, this.y, TILE_SIZE * 0.2, 0xdffcff, 0.65).setDepth(19);
+
+    this.scene.tweens.add({
+      targets: [pulse, pulse2],
+      scale: { from: 0.4, to: 1.8 },
+      alpha: { from: 0.75, to: 0 },
+      duration: 480,
+      ease: 'Cubic.Out',
+      onComplete: () => {
+        pulse.destroy();
+        pulse2.destroy();
+      },
+    });
+
+    this.scene.tweens.add({
+      targets: this.sprite,
+      scaleX: this.sprite.scaleX * 1.08,
+      scaleY: this.sprite.scaleY * 1.08,
+      duration: 140,
+      yoyo: true,
+      ease: 'Sine.easeOut',
+    });
+  }
+
+  _tryTriggerBonyResurrection() {
+    if (this.characterId !== 'bony') return false;
+    if (this._bonyRevivePending) return false;
+    if (this._abilityCooldownRemaining > 0) return false;
+
+    const reviveDelayMs = Math.max(0, Number(this.characterDef.abilityReviveDelayMs || 3000));
+    const invincibilityMs = Math.max(0, Number(this.characterDef.abilityInvincibleMs || 2000));
+    const reviveX = this.sprite.x;
+    const reviveY = this.sprite.y;
+
+    this._bonyRevivePending = true;
+    this._abilityCooldownRemaining = this._abilityCooldownMs;
+    this.refreshAbilityStatus();
+
+    if (this._bonyReviveEvent) {
+      this._bonyReviveEvent.remove(false);
+      this._bonyReviveEvent = null;
+    }
+
+    this._bonyReviveEvent = this.scene.time.delayedCall(reviveDelayMs, () => {
+      this._bonyReviveEvent = null;
+      if (!this._bonyRevivePending) return;
+      if (!this.sprite?.active) return;
+      if (this.scene?._gameOver) return;
+
+      this._bonyRevivePending = false;
+      this._abilityCooldownRemaining = Math.max(0, this._abilityCooldownRemaining - reviveDelayMs);
+
+      this.sprite.setPosition(reviveX, reviveY);
+      this.setOverheadPosition(reviveX, reviveY);
+      this._walkFrame = 0;
+      this._setBombyTransformedVisual(false);
+      this._setIdleTexture();
+      this.sprite.setAlpha(1);
+      this.sprite.setDepth(10);
+      this.label.setAlpha(1);
+      this.alive = true;
+      this.refreshAbilityStatus();
+      this._clearCurse();
+      this._playBonyResurrectionEffect();
+      this._activateTemporaryInvincibility(invincibilityMs);
+
+      if (this.onEvent) {
+        this.onEvent({ t: 'respawn', pi: this.index, x: reviveX, y: reviveY });
+      }
+    });
+
+    return true;
+  }
+
   /** Called when this player gets hit by an explosion */
   die() {
     if (!this.alive) return;
@@ -844,6 +983,13 @@ export class Player {
     this.sprite.setAlpha(0.6);
     this.sprite.setDepth(1);
     this.label.setAlpha(0.3);
+
+    if (this._tryTriggerBonyResurrection()) {
+      this.refreshAbilityStatus();
+      if (this.onEvent) this.onEvent({ t: 'death', pi: this.index });
+      return;
+    }
+
     this.refreshAbilityStatus();
     this.lives--;
     if (this.onEvent) this.onEvent({ t: 'death', pi: this.index });
@@ -890,18 +1036,8 @@ export class Player {
     this.refreshAbilityStatus();
     this._clearCurse(); // clears stunned/_isRushing/_rushPending and fires any pending callback
     this.activeBombs = 0;
-    this.respawnInvincible = true;
-    this.scene.time.delayedCall(1500, () => { this.respawnInvincible = false; });
+    this._activateTemporaryInvincibility(1500);
     if (this.onEvent) this.onEvent({ t: 'respawn', pi: this.index, x: pos.x, y: pos.y });
-    // Brief invincibility flash � onComplete guarantees alpha=1 (yoyo ends at 'from')
-    this.scene.tweens.add({
-      targets: this.sprite,
-      alpha: { from: 0.3, to: 1 },
-      duration: 200,
-      repeat: 6,
-      yoyo: true,
-      onComplete: () => { if (this.sprite.active) this.sprite.setAlpha(1); },
-    });
   }
 
   setBombyTransformState(active) {
@@ -956,6 +1092,11 @@ export class Player {
   }
 
   destroy() {
+    this._stopInvincibilityVisual();
+    if (this._bonyReviveEvent) {
+      this._bonyReviveEvent.remove(false);
+      this._bonyReviveEvent = null;
+    }
     this.setCurseVisualActive(false);
     this.sprite.destroy();
     this.label.destroy();

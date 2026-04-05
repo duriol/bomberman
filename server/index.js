@@ -51,7 +51,7 @@ const io = new Server(httpServer, {
 // ── Room storage ──────────────────────────────────────────────────────────────
 // Map<roomCode, { host, players:[{socketId,clientId,playerIndex,name,characterId,wins}], started, lastWinnerIndex, lastWinnerName }>
 const rooms = new Map();
-const ALLOWED_CHARACTER_IDS = new Set(['wolf', 'bomby']);
+const ALLOWED_CHARACTER_IDS = new Set(['wolf', 'bomby', 'bony', 'will-e']);
 
 function sanitizeName(name, fallback = 'Jugador') {
   const safe = String(name || '').trim().slice(0, 12);

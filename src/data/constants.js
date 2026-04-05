@@ -41,7 +41,7 @@ export const PLAYER_COLORS = [
 
 export const DEFAULT_CHARACTER_ID = 'wolf';
 
-export const CHARACTER_IDS = ['wolf', 'bomby'];
+export const CHARACTER_IDS = ['wolf', 'bomby', 'bony', 'will-e'];
 
 export const CHARACTER_DEFS = {
   wolf: {
@@ -97,6 +97,63 @@ export const CHARACTER_DEFS = {
     hasActiveAbility: true,
     abilityCooldownMs: 20000,
     bombTexture: 'bomb_bomby',
+  },
+  bony: {
+    id: 'bony',
+    label: 'Bony',
+    folder: 'bony',
+    idle: {
+      down: 'bony_idle_down',
+      right: 'bony_idle_right',
+      up: 'bony_idle_up',
+    },
+    walkBase: {
+      down: 'bony_walk_down_',
+      right: 'bony_walk_right_',
+      up: 'bony_walk_up_',
+    },
+    walkFrames: {
+      down: 2,
+      up: 2,
+      right: 4,
+    },
+    spriteHeight: 125,
+    originY: 0.82,
+    abilityName: 'Resurreccion',
+    abilityDesc: 'Ella resucita 3s despues de morir, queda invencible 2s y no suelta items.',
+    hasActiveAbility: true,
+    abilityCooldownMs: 45000,
+    abilityReviveDelayMs: 3000,
+    abilityInvincibleMs: 2000,
+    bombTexture: 'bomb',
+  },
+  'will-e': {
+    id: 'will-e',
+    label: 'Will-e',
+    folder: 'will-e',
+    idle: {
+      down: 'will-e_idle_down',
+      right: 'will-e_idle_right',
+      up: 'will-e_idle_up',
+    },
+    walkBase: {
+      down: 'will-e_walk_down_',
+      right: 'will-e_walk_right_',
+      up: 'will-e_walk_up_',
+    },
+    walkFrames: {
+      down: 2,
+      up: 4,
+      right: 4,
+    },
+    spriteHeight: 125,
+    originY: 0.82,
+    abilityName: 'Misil teledirigido',
+    abilityDesc: 'Will-e lanza un misil al rival aleatorio; cae en 3s y explota con alcance 1.',
+    hasActiveAbility: true,
+    abilityInitialCooldownMs: 10000,
+    abilityCooldownMs: 20000,
+    bombTexture: 'bomb',
   },
 };
 

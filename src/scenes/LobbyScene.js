@@ -526,7 +526,7 @@ export class LobbyScene extends Phaser.Scene {
     dim.fillRect(0, 0, W, H);
     parts.push(dim);
 
-    const panelW = 610;
+    const panelW = Math.min(W - 32, 680);
     const panelH = 390;
     const px = CX - panelW / 2;
     const py = H / 2 - panelH / 2;
@@ -579,10 +579,17 @@ export class LobbyScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(302);
     parts.push(subtitle);
 
-    const cardW = 270;
+    const cardCount = CHARACTER_IDS.length;
+    const gap = 14;
+    const sidePadding = 18;
+    const maxCardW = 270;
+    const cardW = Math.min(
+      maxCardW,
+      Math.floor((panelW - sidePadding * 2 - gap * (cardCount - 1)) / cardCount),
+    );
     const cardH = 200;
-    const gap = 24;
-    const cardStartX = CX - (cardW * CHARACTER_IDS.length + gap * (CHARACTER_IDS.length - 1)) / 2;
+    const compactCards = cardW < 220;
+    const cardStartX = CX - (cardW * cardCount + gap * (cardCount - 1)) / 2;
     const cardY = py + 122;
 
     const refreshCardStyles = () => {
@@ -623,16 +630,16 @@ export class LobbyScene extends Phaser.Scene {
       const sprite = this.add.sprite(x + cardW / 2, y + 78, idleSpriteKey).setDepth(303);
       const src = this.textures.get(idleSpriteKey)?.getSourceImage?.();
       const h = src?.height || 125;
-      sprite.setScale(64 / h);
+      sprite.setScale((compactCards ? 56 : 64) / h);
       parts.push(sprite);
 
       const abilityName = this.add.text(x + 12, y + 120, def.abilityName, {
-        fontSize: '12px', fontFamily: 'monospace', color: '#9de5ff',
+        fontSize: compactCards ? '11px' : '12px', fontFamily: 'monospace', color: '#9de5ff',
       }).setDepth(303);
       parts.push(abilityName);
 
       const abilityDesc = this.add.text(x + 12, y + 142, def.abilityDesc, {
-        fontSize: '10px', fontFamily: 'monospace', color: '#c8e8ff',
+        fontSize: compactCards ? '9px' : '10px', fontFamily: 'monospace', color: '#c8e8ff',
         wordWrap: { width: cardW - 24 },
         lineSpacing: 2,
       }).setDepth(303);
