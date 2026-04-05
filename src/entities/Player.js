@@ -1,6 +1,7 @@
 import {
   TILE_SIZE,
   TILE,
+  ITEM,
   DEFAULT_PLAYER_STATS,
   PLAYER_COLORS,
   SPAWN_POSITIONS,
@@ -69,6 +70,7 @@ export class Player {
     this._passableBombs = new Set(); // bomb tiles this player can still walk through
     this.alive = true;
     this.stunned = false; // skull curse flag
+    this._reverseControls = false; // skull curse variant: inverted movement
     this.curseTimer = 0;
     this._isRushing = false; // rush curse: actively charging at 3x speed
     this._rushActive = false; // rush curse: true for full 5s duration
@@ -83,10 +85,14 @@ export class Player {
 
     this._duplicateTint = null;
     this._hasCurseTint = false;
+    this._curseBlinkTween = null;
 
     this._bombyTransformed = false;
     this._bombyAbilityBombKey = null;
     this._bombyImmuneBomb = false;
+
+    this._abilityCooldownMs = Math.max(0, Number(this.characterDef.abilityCooldownMs || 0));
+    this._abilityCooldownRemaining = 0;
 
     const fallbackIdle = getCharacterIdleKey(DEFAULT_CHARACTER_ID, 'down');
     const initialIdle = getCharacterIdleKey(this.characterId, 'down');
@@ -112,6 +118,18 @@ export class Player {
         strokeThickness: 3,
         fontFamily: 'monospace',
       }).setOrigin(0.5, 1).setDepth(20);
+
+    this.abilityLabel = scene.add.text(pos.x, pos.y - TILE_SIZE / 2 - 17,
+      '', {
+        fontSize: '9px',
+        color: '#66ff9c',
+        backgroundColor: '#0d2a18',
+        padding: { x: 3, y: 1 },
+        fontFamily: 'monospace',
+      }).setOrigin(0.5, 1).setDepth(21);
+    this._abilityStatusKey = '';
+    this.setOverheadPosition(pos.x, pos.y);
+    this.refreshAbilityStatus();
 
     // Movement
     this._dx = 0;
@@ -186,20 +204,30 @@ export class Player {
     const visible = !next;
     this.sprite.setVisible(visible);
     this.label.setVisible(visible);
+    this.abilityLabel.setVisible(visible);
     if (!next) {
       this._walkFrame = 0;
       this._setIdleTexture();
       this._restoreBaseTint();
     }
+    this.refreshAbilityStatus();
   }
 
   isImmuneToExplosion(owner) {
+    if (this._bombyTransformed) return true;
     return owner === this && this._bombyImmuneBomb;
+  }
+
+  _tickAbilityCooldown(delta) {
+    if (this._abilityCooldownRemaining <= 0) return;
+    this._abilityCooldownRemaining = Math.max(0, this._abilityCooldownRemaining - delta);
+    this.refreshAbilityStatus();
   }
 
   _tryActivateCharacterAbility() {
     if (this.characterId !== 'bomby') return;
     if (this._bombyTransformed) return;
+    if (this._abilityCooldownRemaining > 0) return;
     if (!this.alive || !this.sprite.active) return;
 
     const { col, row } = this.tilePos;
@@ -217,6 +245,8 @@ export class Player {
     this._bombyAbilityBombKey = `${col},${row}`;
     this._bombyImmuneBomb = true;
     this._setBombyTransformedVisual(true);
+    this._abilityCooldownRemaining = this._abilityCooldownMs;
+    this.refreshAbilityStatus();
     audioManager.playPlaceBomb();
   }
 
@@ -225,6 +255,44 @@ export class Player {
 
   get tilePos() {
     return pixelToTile(this.sprite.x, this.sprite.y, TILE_SIZE);
+  }
+
+  setOverheadPosition(x, y) {
+    this.label.setPosition(x, y - TILE_SIZE / 2 - 4);
+    this.abilityLabel.setPosition(x, y - TILE_SIZE / 2 - 17);
+  }
+
+  refreshAbilityStatus() {
+    if (!this.abilityLabel?.active) return;
+
+    if (!this.characterDef.hasActiveAbility) {
+      this._abilityStatusKey = 'hidden';
+      this.abilityLabel.setVisible(false);
+      return;
+    }
+
+    const visible = this.alive && !this._bombyTransformed && this.label.visible;
+    this.abilityLabel.setVisible(visible);
+    if (!visible) return;
+
+    this.abilityLabel.setAlpha(this.label.alpha);
+
+    if (this._abilityCooldownRemaining > 0) {
+      const seconds = Math.max(1, Math.ceil(this._abilityCooldownRemaining / 1000));
+      const statusKey = `cd:${seconds}`;
+      if (statusKey !== this._abilityStatusKey) {
+        this._abilityStatusKey = statusKey;
+        this.abilityLabel.setText(`CD ${seconds}s`);
+        this.abilityLabel.setStyle({ color: '#ff6666', backgroundColor: '#2a0d0d' });
+      }
+      return;
+    }
+
+    if (this._abilityStatusKey !== 'ready') {
+      this._abilityStatusKey = 'ready';
+      this.abilityLabel.setText('LISTA');
+      this.abilityLabel.setStyle({ color: '#66ff9c', backgroundColor: '#0d2a18' });
+    }
   }
 
   _normalizeActionInput(input) {
@@ -250,9 +318,10 @@ export class Player {
    */
   update(delta, input) {
     if (!this.alive || !this.sprite.active) return;
+    this._tickAbilityCooldown(delta);
 
-    // Skull curse tick
-    if (this.stunned) {
+    // Skull curse tick (random movement or inverted controls)
+    if (this.stunned || this._reverseControls) {
       this.curseTimer -= delta;
       if (this.curseTimer <= 0) this._clearCurse();
     }
@@ -281,7 +350,7 @@ export class Player {
 
     if (!this._bombyTransformed) {
       this._handleMovement(delta, input);
-      this.label.setPosition(this.sprite.x, this.sprite.y - TILE_SIZE / 2 - 4);
+      this.setOverheadPosition(this.sprite.x, this.sprite.y);
     }
   }
 
@@ -292,9 +361,10 @@ export class Player {
    */
   updateActionsOnly(delta, input) {
     if (!this.alive || !this.sprite.active) return;
+    this._tickAbilityCooldown(delta);
 
-    // Skull curse tick
-    if (this.stunned) {
+    // Skull curse tick (random movement or inverted controls)
+    if (this.stunned || this._reverseControls) {
       this.curseTimer -= delta;
       if (this.curseTimer <= 0) this._clearCurse();
     }
@@ -325,7 +395,7 @@ export class Player {
 
     // Keep label synced to sprite (position was set externally)
     if (!this._bombyTransformed) {
-      this.label.setPosition(this.sprite.x, this.sprite.y - TILE_SIZE / 2 - 4);
+      this.setOverheadPosition(this.sprite.x, this.sprite.y);
     }
   }
 
@@ -360,7 +430,7 @@ export class Player {
         this.sprite.y = canY ? ny : this.sprite.y;
         this._lastMoveVx = vx;
         this._lastMoveVy = vy;
-        this.label.setPosition(this.sprite.x, this.sprite.y - TILE_SIZE / 2 - 4);
+        this.setOverheadPosition(this.sprite.x, this.sprite.y);
         // Walk animation
         this._walkTimer += delta;
         const frameCount = this._getWalkFrameCount();
@@ -396,6 +466,12 @@ export class Player {
       if (vx !== 0 && vy !== 0) {
         vx *= 0.707;
         vy *= 0.707;
+      }
+
+      // Skull variant: invert walking direction while preserving all actions.
+      if (this._reverseControls) {
+        vx = -vx;
+        vy = -vy;
       }
     }
 
@@ -692,12 +768,14 @@ export class Player {
 
   _applyCurse() {
     audioManager.playSkull();
-    this.stunned = true;
+
+    const applyReverse = Math.random() < 0.5;
+    this.stunned = !applyReverse;
+    this._reverseControls = applyReverse;
     this.curseTimer = 10000; // 10 seconds
     this._stunFlipTimer = 0;
     this._stunDir = 0;
-    this._hasCurseTint = true;
-    this.sprite.setTint(0xff0000);
+    this.setCurseVisualActive(true);
   }
 
   _applyRush() {
@@ -705,18 +783,44 @@ export class Player {
     this._rushActive = true;
     this._rushPending = true;
     this._rushTimer = 5000; // 5 seconds, ticked down in update()
-    this._hasCurseTint = true;
-    this.sprite.setTint(0xff6600);
+    this.setCurseVisualActive(true);
+  }
+
+  setCurseVisualActive(active) {
+    const next = !!active;
+    if (next) {
+      this._hasCurseTint = true;
+      this.sprite.setTint(0xff0000);
+      if (!this._curseBlinkTween) {
+        this._curseBlinkTween = this.scene.tweens.add({
+          targets: this.sprite,
+          alpha: { from: 1, to: 0.35 },
+          duration: 140,
+          yoyo: true,
+          repeat: -1,
+        });
+      }
+      return;
+    }
+
+    this._hasCurseTint = false;
+    if (this._curseBlinkTween) {
+      this._curseBlinkTween.stop();
+      this._curseBlinkTween.remove();
+      this._curseBlinkTween = null;
+    }
+    this.sprite.setAlpha(1);
+    this._restoreBaseTint();
   }
 
   _clearCurse() {
     this.stunned = false;
+    this._reverseControls = false;
     this._isRushing = false;
     this._rushActive = false;
     this._rushPending = false;
     this._rushTimer = 0;
-    this._hasCurseTint = false;
-    this._restoreBaseTint();
+    this.setCurseVisualActive(false);
     if (this._curseClearCallback) {
       const cb = this._curseClearCallback;
       this._curseClearCallback = null;
@@ -727,9 +831,12 @@ export class Player {
   /** Called when this player gets hit by an explosion */
   die() {
     if (!this.alive) return;
+    if (this._bombyTransformed) return;
     if (this.respawnInvincible) return; // grace period after respawn
     // Trigger bounty item respawn callback if curse was active
-    if (this.stunned || this._isRushing || this._rushPending) this._clearCurse();
+    if (this.stunned || this._reverseControls || this._isRushing || this._rushPending || this._rushActive) {
+      this._clearCurse();
+    }
     audioManager.playPlayerDeath();
     this.alive = false;
     this._setBombyTransformedVisual(false);
@@ -737,8 +844,33 @@ export class Player {
     this.sprite.setAlpha(0.6);
     this.sprite.setDepth(1);
     this.label.setAlpha(0.3);
+    this.refreshAbilityStatus();
     this.lives--;
     if (this.onEvent) this.onEvent({ t: 'death', pi: this.index });
+  }
+
+  /**
+   * Converts current collected powerups into droppable item types,
+   * then resets combat stats back to defaults.
+   */
+  extractInventoryDrops() {
+    const drops = [];
+
+    const bombUps = Math.max(0, this.stats.maxBombs - DEFAULT_PLAYER_STATS.maxBombs);
+    const fireUps = Math.max(0, this.stats.bombRange - DEFAULT_PLAYER_STATS.bombRange);
+    const speedUps = Math.max(0, Math.floor((this.stats.speed - DEFAULT_PLAYER_STATS.speed) / 20));
+
+    for (let i = 0; i < bombUps; i++) drops.push(ITEM.BOMB_UP);
+    for (let i = 0; i < fireUps; i++) drops.push(ITEM.FIRE_UP);
+    for (let i = 0; i < speedUps; i++) drops.push(ITEM.SPEED_UP);
+    if (this.stats.kick) drops.push(ITEM.KICK);
+    if (this.stats.multiStar) drops.push(ITEM.MULTI_BOMB);
+
+    // Lose collected upgrades on death.
+    this.stats = { ...DEFAULT_PLAYER_STATS };
+    this.activeBombs = Math.min(this.activeBombs, this.stats.maxBombs);
+
+    return Phaser.Utils.Array.Shuffle(drops);
   }
 
   /** Respawn at original position */
@@ -747,6 +879,7 @@ export class Player {
     const spawn = SPAWN_POSITIONS[this.index];
     const pos = tileToPixel(spawn.col, spawn.row, TILE_SIZE);
     this.sprite.setPosition(pos.x, pos.y);
+    this.setOverheadPosition(pos.x, pos.y);
     this._walkFrame = 0;
     this._setBombyTransformedVisual(false);
     this._setIdleTexture();
@@ -754,6 +887,7 @@ export class Player {
     this.sprite.setDepth(10);
     this.label.setAlpha(1);
     this.alive = true;
+    this.refreshAbilityStatus();
     this._clearCurse(); // clears stunned/_isRushing/_rushPending and fires any pending callback
     this.activeBombs = 0;
     this.respawnInvincible = true;
@@ -777,6 +911,7 @@ export class Player {
       this._bombyAbilityBombKey = null;
       this._bombyImmuneBomb = false;
     }
+    this.refreshAbilityStatus();
   }
 
   // -- Network interpolation (remote clients only) --------------------------
@@ -817,11 +952,13 @@ export class Player {
     this.sprite.x = Phaser.Math.Linear(this.sprite.x, targetX, alpha);
     this.sprite.y = Phaser.Math.Linear(this.sprite.y, targetY, alpha);
 
-    this.label.setPosition(this.sprite.x, this.sprite.y - TILE_SIZE / 2 - 4);
+    this.setOverheadPosition(this.sprite.x, this.sprite.y);
   }
 
   destroy() {
+    this.setCurseVisualActive(false);
     this.sprite.destroy();
     this.label.destroy();
+    this.abilityLabel.destroy();
   }
 }

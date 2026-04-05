@@ -60,6 +60,7 @@ export class GameScene extends Phaser.Scene {
     if (this.isOnlineHost) {
       this._lastSentMap = this.map.map(r => [...r]);
       this._stateSeq    = 0;
+      this._fullMapSyncEvery = 120; // send full map snapshot roughly every 2 seconds at 60hz
       this._netAccum    = 0;
       this._eventBuffer = [];
       this._remoteInputs    = {};
@@ -98,7 +99,11 @@ export class GameScene extends Phaser.Scene {
           if (owner && player.isImmuneToExplosion?.(owner)) continue;
           dying.push(player);
         }
-        for (const player of dying) player.die();
+        for (const player of dying) {
+          const wasAlive = player.alive;
+          player.die();
+          if (wasAlive && !player.alive) this._dropPlayerInventory(player);
+        }
         for (const player of dying) this._scheduleRespawn(player);
         // Destroy items on this tile
         this.itemManager.destroyAt(col, row);
@@ -216,6 +221,8 @@ export class GameScene extends Phaser.Scene {
 
     this._gameOver = false;
     this._winnerIndex = undefined;
+    this._winnerName = '';
+    this._spiralStarted = false;
   }
 
   // ─── Map Rendering ─────────────────────────────────────────────────────────
@@ -402,6 +409,37 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  _dropPlayerInventory(player) {
+    if (!player || !player.extractInventoryDrops) return;
+    const drops = player.extractInventoryDrops();
+    if (!drops.length) return;
+    this.itemManager.dropInventoryItems(drops);
+  }
+
+  _crushOccupantsInWalls() {
+    // Any item enclosed by newly-created wall tiles is removed immediately.
+    for (const item of [...this.itemManager.items.values()]) {
+      if (this.map[item.row]?.[item.col] === TILE.WALL) {
+        this.itemManager.removeItem(item.col, item.row);
+      }
+    }
+
+    const dying = [];
+    for (const player of this.players) {
+      if (!player.alive) continue;
+      const pt = player.tilePos;
+      if (this.map[pt.row]?.[pt.col] !== TILE.WALL) continue;
+      const wasAlive = player.alive;
+      player.die();
+      if (wasAlive && !player.alive) {
+        this._dropPlayerInventory(player);
+        dying.push(player);
+      }
+    }
+
+    for (const player of dying) this._scheduleRespawn(player);
+  }
+
   _checkRoundEnd() {
     const alive = this.players.filter(p => p.alive || p.lives > 0);
     if (alive.length <= 1) {
@@ -413,6 +451,8 @@ export class GameScene extends Phaser.Scene {
     if (this._gameOver) return;
     this._gameOver = true;
     this._winnerIndex = winner ? winner.index : -1;
+    this._winnerName = winner ? (winner.displayName || `P${winner.index + 1}`) : '';
+    this._spiralStarted = false;
     if (this._timerEvent) { this._timerEvent.remove(); this._timerEvent = null; }
     if (this._spiralEvent) { this._spiralEvent.remove(); this._spiralEvent = null; }
     audioManager.stopBGM();
@@ -430,7 +470,7 @@ export class GameScene extends Phaser.Scene {
     overlay.fillStyle(0x000000, 0.6);
     overlay.fillRect(0, 0, GAME_WIDTH, CANVAS_HEIGHT);
 
-    const msg   = winner ? `¡P${winner.index + 1} GANA!` : '¡EMPATE!';
+    const msg   = winner ? `¡${this._winnerName} GANA!` : '¡EMPATE!';
     const color = winner ? `#${PLAYER_COLORS[winner.index].main.toString(16).padStart(6, '0')}` : '#ffffff';
 
     this.add.text(GAME_WIDTH / 2, CANVAS_HEIGHT / 2 - 40, msg, {
@@ -449,7 +489,10 @@ export class GameScene extends Phaser.Scene {
         window.removeEventListener('keydown', onKey);
         if (this.isOnlineHost) {
           // Host notifies server (resets room.started + broadcasts to clients)
-          networkManager.returnToLobby();
+          networkManager.returnToLobby({
+            winnerIndex: this._winnerIndex,
+            winnerName: this._winnerName,
+          });
         }
         this._goToLobby({
           roomCode:    networkManager.roomCode,
@@ -635,6 +678,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       this.itemManager.checkPickups(this.players);
+      if (this._spiralStarted) this._crushOccupantsInWalls();
       this._checkRoundEnd();
 
       // Broadcast state if online host (60 hz)
@@ -659,7 +703,7 @@ export class GameScene extends Phaser.Scene {
       { icon: '⚡', name: 'Velocidad',      desc: '+velocidad',                key: 'auto'          },
       { icon: '💥', name: 'Multi-bomba',    desc: 'Bombas en la dirección que miras', key: '3 (H / L / botón 3)' },
       { icon: '👟', name: 'Patada',         desc: 'Patea bombas al pasar',     key: 'auto'          },
-      { icon: '💀', name: 'Maldición',      desc: 'Movimiento aleatorio 10s',  key: '— (trampa)'    },
+      { icon: '💀', name: 'Maldición',      desc: 'Aleatoria: movimiento aleatorio o invertido (10s)',  key: '— (trampa)'    },
       { icon: '🌀', name: 'Enganche',       desc: 'Saldrás disparado hasta la pared', key: '— (trampa)'    },
     ];
 
@@ -756,9 +800,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   _startSpiralClose() {
-    if (this._spiralEvent) return;
-    this._spiralTiles = this._generateSpiralOrder();
-    this._spiralIndex = 0;
+    if (this._spiralStarted) return;
+    this._spiralStarted = true;
 
     // Timer no longer matters once the spiral starts — stop it so it can't
     // trigger _endRound(null) at t=0 while players wait to respawn.
@@ -779,8 +822,15 @@ export class GameScene extends Phaser.Scene {
       onComplete: () => warn.destroy(),
     });
 
+    // Guests only mirror HUD/phase state; host remains authoritative for
+    // actual spiral wall placement and damage.
+    if (this.isOnlineClient) return;
+
+    this._spiralTiles = this._generateSpiralOrder();
+    this._spiralIndex = 0;
+
     this._spiralEvent = this.time.addEvent({
-      delay: 600,
+      delay: Math.round(600 / 1.5),
       callback: this._advanceSpiral,
       callbackScope: this,
       loop: true,
@@ -792,7 +842,10 @@ export class GameScene extends Phaser.Scene {
       const { col, row } = this._spiralTiles[this._spiralIndex++];
       if (this.map[row][col] === TILE.WALL) continue;
 
-      this.itemManager.destroyAt(col, row);
+      // Closing walls destroy anything already on that tile, including bounty items.
+      if (this.itemManager.items.has(`${col},${row}`)) {
+        this.itemManager.removeItem(col, row);
+      }
 
       // Collect all players on this tile before processing deaths so that
       // simultaneous kills (e.g. two players on same tile) are all registered
@@ -805,8 +858,9 @@ export class GameScene extends Phaser.Scene {
         if (pt.col === col && pt.row === row) dying.push(player);
       }
       for (const player of dying) {
+        const wasAlive = player.alive;
         player.die();
-        if (this.isOnlineHost) this._eventBuffer.push({ t: 'death', pi: player.index });
+        if (wasAlive && !player.alive) this._dropPlayerInventory(player);
       }
       for (const player of dying) {
         this._scheduleRespawn(player);
@@ -837,6 +891,9 @@ export class GameScene extends Phaser.Scene {
   // ─── Online: State Serialization (host) ───────────────────────────────────
 
   _serializeState() {
+    const seq = this._stateSeq++;
+    const includeFullMap = (seq % this._fullMapSyncEvery) === 0;
+
     // Map diff — only tiles changed since last broadcast
     const mapDiff = [];
     for (let r = 0; r < MAP_ROWS; r++) {
@@ -849,7 +906,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     const state = {
-      sq: this._stateSeq++,
+      sq: seq,
+      mf: includeFullMap ? this.map.map((row) => row.join('')) : undefined,
       pl: this.players.map(p => ({
         x:   Math.round(p.x),
         y:   Math.round(p.y),
@@ -864,8 +922,10 @@ export class GameScene extends Phaser.Scene {
         br:  p.stats.bombRange,
         sp:  p.stats.speed,
         st:  p.stunned,
+        rv:  p._reverseControls || false,
         ra:  p._rushActive   || false,
         rp:  p._rushPending  || false,
+        ac:  Math.max(0, Math.ceil(p._abilityCooldownRemaining || 0)),
         ki:  p.stats.kick    || false,
         ms:  p.stats.multiStar || false,
         fr:  p._walkFrame || 0,
@@ -874,6 +934,7 @@ export class GameScene extends Phaser.Scene {
       it:  [...this.itemManager.items.values()].map(i => ({ c: i.col, r: i.row, tp: i.type })),
       md:  mapDiff,
       ev:  this._eventBuffer.splice(0), // drain event buffer
+      sp:  this._spiralStarted,
       go:  this._gameOver,
       wi:  this._winnerIndex,
     };
@@ -884,7 +945,28 @@ export class GameScene extends Phaser.Scene {
   // ─── Online: State Application (client) ───────────────────────────────────
 
   _applyRemoteState(state) {
-    // 1. Apply map diffs (blocks destroyed)
+    // Host entered spiral close: guests must stop local timer countdown
+    // immediately and switch HUD to closure state.
+    if (state.sp && !this._spiralStarted) {
+      this._startSpiralClose();
+    }
+
+    // 1. Full map snapshot (periodic host resync)
+    if (Array.isArray(state.mf) && state.mf.length === MAP_ROWS) {
+      for (let r = 0; r < MAP_ROWS; r++) {
+        const rowStr = String(state.mf[r] || '');
+        for (let c = 0; c < MAP_COLS; c++) {
+          const next = Number(rowStr[c]);
+          if (!Number.isFinite(next)) continue;
+          if (this.map[r]?.[c] !== next) {
+            this.map[r][c] = next;
+            this._drawTile(c, r);
+          }
+        }
+      }
+    }
+
+    // 2. Apply map diffs (blocks destroyed)
     if (state.md) {
       for (const { c, r, t } of state.md) {
         if (this.map[r]?.[c] !== t) {
@@ -894,7 +976,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 2. Process one-time events (explosions, sounds)
+    // 3. Process one-time events (explosions, sounds)
     if (state.ev) {
       for (const ev of state.ev) {
         if (ev.t === 'explode') {
@@ -915,7 +997,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 3. Update players
+    // 4. Update players
     if (state.pl) {
       state.pl.forEach((ps, i) => {
         const p = this.players[i];
@@ -936,7 +1018,7 @@ export class GameScene extends Phaser.Scene {
               p.sprite.setPosition(ps.x, ps.y);
               p.sprite.setAlpha(1);
               p.sprite.setDepth(10);
-              p.label.setPosition(ps.x, ps.y - 28);
+              p.setOverheadPosition(ps.x, ps.y);
               p.label.setAlpha(1);
             }
             if ((ps.vx || 0) !== 0 || (ps.vy || 0) !== 0) {
@@ -947,7 +1029,7 @@ export class GameScene extends Phaser.Scene {
           } else {
             // Dead: snap directly, no interpolation needed
             p.sprite.setPosition(ps.x, ps.y);
-            p.label.setPosition(ps.x, ps.y - 28);
+            p.setOverheadPosition(ps.x, ps.y);
             if (p.alive && !ps.al) {
               p._setDeadTexture();
               p.sprite.setAlpha(0.6);
@@ -974,7 +1056,7 @@ export class GameScene extends Phaser.Scene {
             p.sprite.clearTint();
             p._restoreBaseTint();
             p.label.setAlpha(1);
-            p.label.setPosition(ps.x, ps.y - 28);
+            p.setOverheadPosition(ps.x, ps.y);
             this.tweens.add({
               targets: p.sprite, alpha: { from: 0.3, to: 1 },
               duration: 200, repeat: 6, yoyo: true,
@@ -984,7 +1066,8 @@ export class GameScene extends Phaser.Scene {
           // No position reconciliation — client position is never overridden
         }
 
-        const prevStunned   = p.stunned;
+        const prevStunned    = p.stunned;
+        const prevReverse    = p._reverseControls;
         const prevRushActive = p._rushActive;
 
         p.alive           = ps.al;
@@ -993,28 +1076,27 @@ export class GameScene extends Phaser.Scene {
         p.stats.bombRange = ps.br;
         p.stats.speed     = ps.sp;
         p.stunned         = ps.st;
+        p._reverseControls = ps.rv || false;
         p._rushActive     = ps.ra || false;
         p._rushPending    = ps.rp || false;
+        p._abilityCooldownRemaining = Math.max(0, Number(ps.ac || 0));
         p.stats.kick      = ps.ki || false;
         p.stats.multiStar = ps.ms || false;
 
         // Reinit curse timers when host flips them on — without this the client
         // update() loop would see curseTimer=0 and immediately call _clearCurse().
         if (ps.st && !prevStunned)    p.curseTimer = 10000;
+        if (ps.rv && !prevReverse)    p.curseTimer = 10000;
         if (ps.ra && !prevRushActive) p._rushTimer  = 5000;
 
-        // Apply or clear visual tint for curse effects
-        if (ps.st) {
-          p.sprite.setTint(0xff0000);
-        } else if (ps.ra) {
-          p.sprite.setTint(0xff6600);
-        } else if (ps.al) {
-          p._restoreBaseTint();
-        }
+        const hasCurseVisual = !!(ps.al && (ps.st || ps.rv || ps.ra));
+        p.setCurseVisualActive(hasCurseVisual);
+        if (!hasCurseVisual && ps.al) p._restoreBaseTint();
+        p.refreshAbilityStatus();
       });
     }
 
-    // 4. Reconcile bomb sprites (no timer logic — just visual presence)
+    // 5. Reconcile bomb sprites (no timer logic — just visual presence)
     if (state.bm) {
       const bombTextureByKey = new Map(state.bm.map(b => [`${b.col},${b.row}`, b.tk || 'bomb']));
       const newSet = new Set([...bombTextureByKey.keys()]);
@@ -1093,7 +1175,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 5. Reconcile items
+    // 6. Reconcile items
     if (state.it) {
       const newItemSet = new Set(state.it.map(i => `${i.c},${i.r}`));
       for (const [key, item] of this.itemManager.items) {
@@ -1106,7 +1188,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 6. Game over from host
+    // 7. Game over from host
     if (state.go && !this._gameOver) {
       this._endRound(state.wi >= 0 ? this.players[state.wi] : null);
     }

@@ -193,14 +193,30 @@ export class ItemManager {
     if (pos) this._spawnItem(pos.col, pos.row, type, usesLeft);
   }
 
+  /**
+   * Scatter a list of item types on random free floor tiles.
+   * Used when a player dies and drops their collected upgrades.
+   */
+  dropInventoryItems(types = []) {
+    if (!Array.isArray(types) || !types.length) return;
+    const reserved = new Set();
+    for (const type of types) {
+      const pos = this._randomFloorTile(reserved);
+      if (!pos) break;
+      reserved.add(`${pos.col},${pos.row}`);
+      this._spawnItem(pos.col, pos.row, type);
+    }
+  }
+
   /** Pick a random FLOOR tile that isn’t already occupied by an item. */
-  _randomFloorTile() {
+  _randomFloorTile(reserved = null) {
     const map = this.scene.map;
     const floors = [];
     for (let r = 0; r < map.length; r++) {
       for (let c = 0; c < map[r].length; c++) {
         if (map[r][c] !== TILE.FLOOR) continue;
         if (this.items.has(`${c},${r}`)) continue;
+        if (reserved && reserved.has(`${c},${r}`)) continue;
         floors.push({ col: c, row: r });
       }
     }

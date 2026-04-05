@@ -6,10 +6,10 @@
  * Protocol summary
  * ─────────────────
  * Client → Server:
- *   create_room                    → room_created | room_error
- *   join_room   { roomCode }       → room_joined  | room_error
+ *   create_room { clientId? }      → room_created | room_error
+ *   join_room   { roomCode, clientId? } → room_joined  | room_error
  *   start_game  { roomCode }       → game_start broadcast (host only)
- *   return_to_lobby { roomCode }   → return_to_lobby broadcast (host only)
+ *   return_to_lobby { roomCode, winnerIndex, winnerName } → return_to_lobby broadcast (host only)
  *   update_name { roomCode, name }  → room_update broadcast
  *   player_input { roomCode, inputs }  → remote_input forwarded to host
  *   game_state  { roomCode, state }   → game_state broadcast to non-host players
@@ -19,9 +19,9 @@
  *   room_created   { roomCode, playerIndex }
  *   room_joined    { roomCode, playerIndex }
  *   room_error     string
- *   room_update    { roomCode, players:[{playerIndex}], started }
+ *   room_update    { roomCode, players:[{playerIndex,name,characterId,wins}], started, lastWinner* }
  *   game_start     { playerCount, seed }     (broadcast)
- *   return_to_lobby { roomCode, players, playerCount } (broadcast)
+ *   return_to_lobby { roomCode, players, playerCount, lastWinner* } (broadcast)
  *   remote_input   { playerIndex, inputs }   (host only)
  *   game_state     state                     (non-host)
  *   player_left    { playerIndex }           (broadcast)
@@ -49,7 +49,7 @@ const io = new Server(httpServer, {
 });
 
 // ── Room storage ──────────────────────────────────────────────────────────────
-// Map<roomCode, { host: socketId, players: [{socketId, playerIndex}], started }>
+// Map<roomCode, { host, players:[{socketId,clientId,playerIndex,name,characterId,wins}], started, lastWinnerIndex, lastWinnerName }>
 const rooms = new Map();
 const ALLOWED_CHARACTER_IDS = new Set(['wolf', 'bomby']);
 
@@ -64,6 +64,24 @@ function sanitizeCharacterId(characterId) {
   return ALLOWED_CHARACTER_IDS.has(id) ? id : 'wolf';
 }
 
+function sanitizeClientId(clientId, fallback = '') {
+  const raw = String(clientId || '').trim();
+  const compact = raw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  if (compact.length >= 8) return compact;
+
+  const fb = String(fallback || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(-24);
+  if (fb.length >= 6) return 'sid_' + fb;
+  return 'anon_' + Math.random().toString(36).slice(2, 12);
+}
+
+function normalizeLobbyPlayerOrder(room) {
+  if (!room || room.started) return;
+  room.players.sort((a, b) => a.playerIndex - b.playerIndex);
+  for (let i = 0; i < room.players.length; i++) {
+    room.players[i].playerIndex = i;
+  }
+}
+
 function makeCode() {
   return Math.random().toString(36).slice(2, 7).toUpperCase();
 }
@@ -71,15 +89,19 @@ function makeCode() {
 function roomInfo(code) {
   const room = rooms.get(code);
   if (!room) return null;
+  normalizeLobbyPlayerOrder(room);
   return {
     roomCode:    code,
     players:     room.players.map(p => ({
       playerIndex: p.playerIndex,
       name: p.name || ('Jugador ' + (p.playerIndex + 1)),
       characterId: sanitizeCharacterId(p.characterId),
+      wins: Number.isFinite(p.wins) ? p.wins : 0,
     })),
     playerCount: room.players.length,
     started:     room.started,
+    lastWinnerIndex: Number.isFinite(room.lastWinnerIndex) ? room.lastWinnerIndex : -1,
+    lastWinnerName: room.lastWinnerName || '',
   };
 }
 
@@ -122,7 +144,7 @@ io.on('connection', (socket) => {
   console.log('[+]', socket.id);
 
   // ── Create room ────────────────────────────────────────────────────────────
-  socket.on('create_room', ({ name, characterId } = {}) => {
+  socket.on('create_room', ({ name, characterId, clientId } = {}) => {
     leaveRoom(socket);
 
     let code;
@@ -130,15 +152,20 @@ io.on('connection', (socket) => {
 
     const safeName = sanitizeName(name, 'Jugador 1');
     const safeCharacterId = sanitizeCharacterId(characterId);
+    const safeClientId = sanitizeClientId(clientId, socket.id);
     rooms.set(code, {
       host:    socket.id,
       players: [{
         socketId: socket.id,
+        clientId: safeClientId,
         playerIndex: 0,
         name: safeName,
         characterId: safeCharacterId,
+        wins: 0,
       }],
       started: false,
+      lastWinnerIndex: -1,
+      lastWinnerName: '',
     });
 
     socket.join(code);
@@ -147,12 +174,38 @@ io.on('connection', (socket) => {
   });
 
   // ── Join room ──────────────────────────────────────────────────────────────
-  socket.on('join_room', ({ roomCode, name, characterId }) => {
+  socket.on('join_room', ({ roomCode, name, characterId, clientId } = {}) => {
     const code = (roomCode || '').toUpperCase().trim();
     const room = rooms.get(code);
+    const safeClientId = sanitizeClientId(clientId, socket.id);
+    const existing = room?.players.find(p => p.clientId === safeClientId);
 
     if (!room)              { socket.emit('room_error', 'Sala no encontrada'); return; }
     if (room.started)       { socket.emit('room_error', 'La partida ya comenzó'); return; }
+
+    if (existing) {
+      if (existing.socketId !== socket.id) {
+        leaveRoom(socket);
+      }
+
+      const oldSocketId = existing.socketId;
+      existing.socketId = socket.id;
+      existing.name = sanitizeName(name, existing.name || ('Jugador ' + (existing.playerIndex + 1)));
+      existing.characterId = sanitizeCharacterId(characterId || existing.characterId);
+      existing.clientId = safeClientId;
+
+      socket.join(code);
+      if (oldSocketId && oldSocketId !== socket.id) {
+        const oldSocket = io.sockets.sockets.get(oldSocketId);
+        if (oldSocket) oldSocket.leave(code);
+      }
+
+      socket.emit('room_joined', { roomCode: code, playerIndex: existing.playerIndex, reconnected: true });
+      io.to(code).emit('room_update', roomInfo(code));
+      return;
+    }
+
+    normalizeLobbyPlayerOrder(room);
     if (room.players.length >= 5) { socket.emit('room_error', 'Sala llena (máx 5 jugadores)'); return; }
 
     leaveRoom(socket);
@@ -162,10 +215,13 @@ io.on('connection', (socket) => {
     const safeCharacterId = sanitizeCharacterId(characterId);
     room.players.push({
       socketId: socket.id,
+      clientId: safeClientId,
       playerIndex,
       name: safeName,
       characterId: safeCharacterId,
+      wins: 0,
     });
+    normalizeLobbyPlayerOrder(room);
     socket.join(code);
     socket.emit('room_joined', { roomCode: code, playerIndex });
     io.to(code).emit('room_update', roomInfo(code));
@@ -177,6 +233,7 @@ io.on('connection', (socket) => {
     if (!room || room.host !== socket.id) return;
     if (room.players.length < 2) { socket.emit('room_error', 'Se necesitan al menos 2 jugadores'); return; }
 
+    normalizeLobbyPlayerOrder(room);
     room.started = true;
     const seed = (Math.random() * 0xFFFFFFFF) >>> 0;
     const playerProfiles = room.players.map(p => ({
@@ -228,9 +285,26 @@ io.on('connection', (socket) => {
   });
 
   // ── Return to lobby (host only) ──────────────────────────────────────────
-  socket.on('return_to_lobby', ({ roomCode }) => {
+  socket.on('return_to_lobby', ({ roomCode, winnerIndex, winnerName } = {}) => {
     const room = rooms.get(roomCode);
     if (!room || room.host !== socket.id) return;
+
+    const wi = Number.isFinite(Number(winnerIndex)) ? Number(winnerIndex) : -1;
+    if (wi >= 0) {
+      const winner = room.players.find(p => p.playerIndex === wi);
+      if (winner) {
+        winner.wins = (Number.isFinite(winner.wins) ? winner.wins : 0) + 1;
+        room.lastWinnerIndex = wi;
+        room.lastWinnerName = sanitizeName(winnerName || winner.name || ('Jugador ' + (wi + 1)));
+      } else {
+        room.lastWinnerIndex = -1;
+        room.lastWinnerName = '';
+      }
+    } else {
+      room.lastWinnerIndex = -1;
+      room.lastWinnerName = '';
+    }
+
     room.started = false;
     io.to(roomCode).emit('return_to_lobby', roomInfo(roomCode));
   });

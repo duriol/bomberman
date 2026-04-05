@@ -21,10 +21,34 @@ class NetworkManager {
     this.playerIndex = -1;
     this.playerName  = '';
     this.playerCharacterId = DEFAULT_CHARACTER_ID;
+    this.clientId    = this._getOrCreateClientId();
     this.isHost      = false;
     this.connected   = false;
     this.lastPlayers = [];
     this._handlers   = {};
+  }
+
+  _makeClientId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `cid_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  }
+
+  _getOrCreateClientId() {
+    const key = 'bomberman_client_id';
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const existing = String(window.localStorage.getItem(key) || '').trim();
+        if (existing) return existing;
+        const next = this._makeClientId();
+        window.localStorage.setItem(key, next);
+        return next;
+      }
+    } catch {
+      // Ignore storage access issues and fallback to ephemeral id.
+    }
+    return this._makeClientId();
   }
 
   /**
@@ -78,6 +102,7 @@ class NetworkManager {
         playerIndex,
         name: this.playerName || ('Jugador 1'),
         characterId: this.playerCharacterId || DEFAULT_CHARACTER_ID,
+        wins: 0,
       }];
       this._emit('room_created', { roomCode, playerIndex });
     });
@@ -96,6 +121,7 @@ class NetworkManager {
         this.lastPlayers = info.players.map(p => ({
           ...p,
           characterId: p.characterId || DEFAULT_CHARACTER_ID,
+          wins: Number.isFinite(p.wins) ? p.wins : 0,
         }));
         normalizedInfo = {
           ...info,
@@ -118,6 +144,7 @@ class NetworkManager {
         this.lastPlayers = data.players.map(p => ({
           ...p,
           characterId: p.characterId || DEFAULT_CHARACTER_ID,
+          wins: Number.isFinite(p.wins) ? p.wins : 0,
         }));
       }
       this._emit('return_to_lobby', {
@@ -153,7 +180,11 @@ class NetworkManager {
     const safeCharacterId = String(characterId || DEFAULT_CHARACTER_ID).trim().toLowerCase();
     this.playerName = safeName;
     this.playerCharacterId = safeCharacterId || DEFAULT_CHARACTER_ID;
-    this.socket.emit('create_room', { name: safeName, characterId: this.playerCharacterId });
+    this.socket.emit('create_room', {
+      name: safeName,
+      characterId: this.playerCharacterId,
+      clientId: this.clientId,
+    });
   }
 
   joinRoom(code, name = '', characterId = this.playerCharacterId) {
@@ -166,6 +197,7 @@ class NetworkManager {
       roomCode: code,
       name: safeName,
       characterId: this.playerCharacterId,
+      clientId: this.clientId,
     });
   }
 
@@ -174,9 +206,13 @@ class NetworkManager {
     this.socket.emit('start_game', { roomCode: this.roomCode, itemConfig });
   }
 
-  returnToLobby() {
+  returnToLobby({ winnerIndex = -1, winnerName = '' } = {}) {
     if (!this.socket || !this.roomCode) return;
-    this.socket.emit('return_to_lobby', { roomCode: this.roomCode });
+    this.socket.emit('return_to_lobby', {
+      roomCode: this.roomCode,
+      winnerIndex,
+      winnerName,
+    });
   }
 
   updateName(name = '') {

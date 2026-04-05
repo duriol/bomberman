@@ -26,7 +26,7 @@ export const ITEM = {
   SPEED_UP:   'speed_up',    // +movement speed
   MULTI_BOMB: 'multi_bomb',  // place all bombs in facing direction
   KICK:       'kick',        // kick bombs
-  SKULL:      'skull',       // random curse: random movement
+  SKULL:      'skull',       // random curse: random movement or inverted movement
   RUSH:       'rush',        // curse: locked direction at high speed until wall
 };
 
@@ -68,6 +68,7 @@ export const CHARACTER_DEFS = {
     abilityName: 'Traspasar bombas',
     abilityDesc: 'Wolf puede atravesar bombas como habilidad pasiva.',
     hasActiveAbility: false,
+    abilityCooldownMs: 0,
     bombTexture: 'bomb',
   },
   bomby: {
@@ -94,6 +95,7 @@ export const CHARACTER_DEFS = {
     abilityName: 'Forma bomba',
     abilityDesc: 'Bomby se vuelve bomba por 3s, explota y regresa sin autodaño.',
     hasActiveAbility: true,
+    abilityCooldownMs: 20000,
     bombTexture: 'bomb_bomby',
   },
 };

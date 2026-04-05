@@ -13,7 +13,7 @@ const ITEM_DEFS = [
   { type: ITEM.SPEED_UP,   label: 'Velocidad',     desc: '+velocidad de movimiento',       color: '#44ff88', default: 4 },
   { type: ITEM.KICK,       label: 'Patada',        desc: 'Patear bombas al pasar junto',   color: '#4488ff', default: 3 },
   { type: ITEM.MULTI_BOMB, label: 'Multi-Bomba',   desc: 'Todas las bombas de un golpe',   color: '#ffdd00', default: 2 },
-  { type: ITEM.SKULL,      label: 'Calavera',      desc: 'Maldición: movimiento aleatorio',color: '#cc44ff', default: 1 },
+  { type: ITEM.SKULL,      label: 'Calavera',      desc: 'Maldición: aleatorio o invertido',color: '#cc44ff', default: 1 },
   { type: ITEM.RUSH,       label: 'Rush',          desc: 'Maldición: arrastre hasta pared',color: '#ff44aa', default: 0 },
 ];
 

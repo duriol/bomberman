@@ -35,6 +35,8 @@ export class LobbyScene extends Phaser.Scene {
     this._editModal = null;
     this._editNameDraft = '';
     this._editCharacterDraft = DEFAULT_CHARACTER_ID;
+    this._rankingModal = null;
+    this._lastWinnerText = null;
   }
 
   init(data) {
@@ -56,6 +58,8 @@ export class LobbyScene extends Phaser.Scene {
     this._editModal = null;
     this._editNameDraft = '';
     this._editCharacterDraft = this._selectedCharacterId;
+    this._rankingModal = null;
+    this._lastWinnerText = null;
   }
 
   preload() {
@@ -225,6 +229,16 @@ export class LobbyScene extends Phaser.Scene {
     }).setOrigin(0.5);
     this._grpRoom.push(this._shareHint);
 
+    this._lastWinnerText = this.add.text(CX, 468, 'Sin victorias registradas en esta sala', {
+      fontSize: '10px', fontFamily: 'monospace', color: '#7fa7bf',
+    }).setOrigin(0.5);
+    this._grpRoom.push(this._lastWinnerText);
+
+    this._btnRanking = this._makeBtn(CX, 500, 'VER RANKING', '#3d2a61', '#614592');
+    this._btnRanking.setScale(0.82);
+    this._btnRanking.on('pointerdown', () => this._openRankingModal(networkManager.lastPlayers));
+    this._grpRoom.push(this._btnRanking);
+
     const lblPlayers = this.add.text(CX, 468, 'Jugadores en la sala:', {
       fontSize: '11px', fontFamily: 'monospace', color: '#8ca8b7',
     }).setOrigin(0.5);
@@ -282,9 +296,11 @@ export class LobbyScene extends Phaser.Scene {
         this._setStatus('De vuelta en el lobby. Esperando al anfitri\u00f3n...', '#88ff88');
       }
       this._rebuildPlayerCards(networkManager.lastPlayers);
+      this._updateLastWinnerText(this._returningRoom?.lastWinnerName || '');
     } else {
       this._showGroup(this._grpConnect, true);
       this._setStatus('Introduce la URL del servidor y pulsa CONECTAR');
+      this._updateLastWinnerText('');
     }
   }
 
@@ -382,6 +398,104 @@ export class LobbyScene extends Phaser.Scene {
 
   _showGroup(arr, visible) { arr.forEach(o => o && o.setVisible(visible)); }
   _setStatus(msg, color = '#aaddff') { this._status.setText(msg).setStyle({ color }); }
+
+  _updateLastWinnerText(lastWinnerName = '') {
+    if (!this._lastWinnerText) return;
+    const name = String(lastWinnerName || '').trim();
+    if (!name) {
+      this._lastWinnerText.setText('Sin victorias registradas en esta sala').setStyle({ color: '#7fa7bf' });
+      return;
+    }
+    this._lastWinnerText
+      .setText(`Ultimo ganador: ${name}`)
+      .setStyle({ color: '#9dffb8' });
+  }
+
+  _openRankingModal(players = []) {
+    this._closeRankingModal();
+
+    const list = (Array.isArray(players) ? players : [])
+      .map((p) => ({
+        playerIndex: p.playerIndex,
+        name: String(p.name || (`Jugador ${Number(p.playerIndex || 0) + 1}`)).slice(0, 12),
+        wins: Number.isFinite(p.wins) ? p.wins : 0,
+      }))
+      .sort((a, b) => {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        return a.playerIndex - b.playerIndex;
+      });
+
+    const parts = [];
+
+    const dim = this.add.graphics().setDepth(320);
+    dim.fillStyle(0x000000, 0.72);
+    dim.fillRect(0, 0, W, H);
+    parts.push(dim);
+
+    const panelW = 470;
+    const panelH = 320;
+    const px = CX - panelW / 2;
+    const py = H / 2 - panelH / 2;
+
+    const panel = this.add.graphics().setDepth(321);
+    panel.fillStyle(0x0b1f34, 0.98);
+    panel.fillRoundedRect(px, py, panelW, panelH, 12);
+    panel.lineStyle(2, 0x4dd2ff, 0.9);
+    panel.strokeRoundedRect(px, py, panelW, panelH, 12);
+    parts.push(panel);
+
+    const title = this.add.text(CX, py + 16, 'RANKING DE LA SALA', {
+      fontSize: '20px', fontFamily: 'monospace', color: '#9af4ff',
+      stroke: '#0a3142', strokeThickness: 4,
+    }).setOrigin(0.5, 0).setDepth(322);
+    parts.push(title);
+
+    const hdr = this.add.text(CX, py + 52, '#   JUGADOR        VICTORIAS', {
+      fontSize: '12px', fontFamily: 'monospace', color: '#7fb7d5',
+    }).setOrigin(0.5, 0).setDepth(322);
+    parts.push(hdr);
+
+    if (!list.length) {
+      const empty = this.add.text(CX, py + 140, 'No hay jugadores registrados en la sala', {
+        fontSize: '12px', fontFamily: 'monospace', color: '#7fa7bf',
+      }).setOrigin(0.5).setDepth(322);
+      parts.push(empty);
+    } else {
+      const rowH = 28;
+      const startY = py + 82;
+      list.forEach((p, idx) => {
+        const y = startY + idx * rowH;
+        const row = this.add.graphics().setDepth(321);
+        row.fillStyle(idx % 2 === 0 ? 0x11263a : 0x0d2031, 0.95);
+        row.fillRoundedRect(px + 20, y, panelW - 40, rowH - 2, 6);
+        parts.push(row);
+
+        const line = `${String(idx + 1).padStart(2, '0')}  ${p.name.padEnd(12, ' ').slice(0, 12)}      ${String(p.wins).padStart(2, '0')}`;
+        const txt = this.add.text(CX, y + 12, line, {
+          fontSize: '12px', fontFamily: 'monospace', color: idx === 0 ? '#d9ff6f' : '#e9f7ff',
+        }).setOrigin(0.5, 0.5).setDepth(322);
+        parts.push(txt);
+      });
+    }
+
+    const btnClose = this._makeBtn(CX, py + panelH - 30, 'CERRAR', '#245071', '#32709f').setDepth(322);
+    btnClose.setScale(0.84);
+    btnClose.on('pointerdown', () => this._closeRankingModal());
+    parts.push(btnClose);
+
+    dim.setInteractive(
+      new Phaser.Geom.Rectangle(0, 0, W, H),
+      Phaser.Geom.Rectangle.Contains,
+    ).on('pointerdown', () => this._closeRankingModal());
+
+    this._rankingModal = { parts };
+  }
+
+  _closeRankingModal() {
+    if (!this._rankingModal) return;
+    this._rankingModal.parts.forEach((p) => p?.destroy?.());
+    this._rankingModal = null;
+  }
 
   _setJoinCodeDisplay(code) {
     const raw = String(code || '')
@@ -671,6 +785,7 @@ export class LobbyScene extends Phaser.Scene {
 
       const { playerIndex, name } = p;
       const characterId = normalizeCharacterId(p.characterId || DEFAULT_CHARACTER_ID);
+      const wins = Number.isFinite(p.wins) ? p.wins : 0;
       const pc = PLAYER_COLORS[playerIndex] || PLAYER_COLORS[0];
       const leftChip = this.add.graphics();
       leftChip.fillStyle(pc.main, 0.95);
@@ -700,6 +815,12 @@ export class LobbyScene extends Phaser.Scene {
         backgroundColor: '#89d5ff', padding: { x: 4, y: 1 },
       }).setOrigin(0.5);
       this._playerCards.push(charTag);
+
+      const winsTag = this.add.text(CX + 26, y + 12, `W:${wins}`, {
+        fontSize: '9px', fontFamily: 'monospace', color: '#1b2300',
+        backgroundColor: '#d9ff6f', padding: { x: 4, y: 1 },
+      }).setOrigin(0.5);
+      this._playerCards.push(winsTag);
 
       if (playerIndex === 0) {
         const hostTag = this.add.text(CX + 142, y + 12, 'HOST', {
@@ -751,6 +872,7 @@ export class LobbyScene extends Phaser.Scene {
       networkManager.on('room_created', ({ roomCode }) => {
         this._setRoomCode(roomCode);
         this._shareHint.setText('Comparte este código con tus amigos');
+        this._updateLastWinnerText('');
         this._showGroup(this._grpRole,   false);
         this._showGroup(this._grpJoin,   false);
         this._showGroup(this._grpRoom,   true);
@@ -762,6 +884,7 @@ export class LobbyScene extends Phaser.Scene {
       networkManager.on('room_joined', ({ roomCode }) => {
         this._setRoomCode(roomCode);
         this._shareHint.setText('');
+        this._updateLastWinnerText('');
         this._showGroup(this._grpRole,   false);
         this._showGroup(this._grpJoin,   false);
         this._showGroup(this._grpRoom,   true);
@@ -770,8 +893,9 @@ export class LobbyScene extends Phaser.Scene {
         this._setStatus('Unido a la sala ' + roomCode + '. Esperando al anfitrión...', '#88ff88');
       }),
       networkManager.on('room_error', msg => this._setStatus('✗ ' + msg, '#ff8866')),
-      networkManager.on('room_update', ({ players, playerCount, roomCode }) => {
+      networkManager.on('room_update', ({ players, playerCount, roomCode, lastWinnerName }) => {
         this._rebuildPlayerCards(players);
+        this._updateLastWinnerText(lastWinnerName);
         if (networkManager.isHost) {
           const ok = playerCount >= 2;
           this._btnStart.setAlpha(ok ? 1 : 0.4);
@@ -793,7 +917,7 @@ export class LobbyScene extends Phaser.Scene {
           seed, playerNames, playerProfiles, itemConfig,
         });
       }),
-      networkManager.on('return_to_lobby', ({ players, playerCount, roomCode }) => {
+      networkManager.on('return_to_lobby', ({ players, playerCount, roomCode, lastWinnerName }) => {
         // Could arrive if another tab / reconnect triggers it while already in lobby
         this._showGroup(this._grpJoin, false);
         this._showGroup(this._grpRoom, true);
@@ -806,6 +930,7 @@ export class LobbyScene extends Phaser.Scene {
         }
         this._setRoomCode(roomCode || networkManager.roomCode);
         this._rebuildPlayerCards(players || []);
+        this._updateLastWinnerText(lastWinnerName);
         this._setStatus('De vuelta en el lobby.', '#88ff88');
       }),
       networkManager.on('host_left', () => {
@@ -815,6 +940,7 @@ export class LobbyScene extends Phaser.Scene {
       }),
       networkManager.on('disconnected', () => {
         this._closeEditModal();
+        this._closeRankingModal();
         this._setStatus('Desconectado del servidor', '#ff6666');
         this._showGroup(this._grpRole,    false);
         this._showGroup(this._grpJoin,    false);
@@ -830,6 +956,7 @@ export class LobbyScene extends Phaser.Scene {
 
   _cleanup() {
     this._closeEditModal();
+    this._closeRankingModal();
     this._unsubs.forEach(u => u());
     this._unsubs = [];
   }

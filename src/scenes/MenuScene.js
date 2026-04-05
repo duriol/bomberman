@@ -403,7 +403,7 @@ export class MenuScene extends Phaser.Scene {
       { icon: '⚡', name: 'Velocidad', desc: 'Aumenta la\nvelocidad', key: 'Automatico' },
       { icon: '💥', name: 'Multi-bomba', desc: 'Pone todas tus bombas en la direccion que miras', key: 'Accion 3 (H / L)' },
       { icon: '👟', name: 'Patada', desc: 'Patea bombas al\npasar junto a ellas', key: 'Automatico' },
-      { icon: '💀', name: 'Maldicion', desc: 'Movimiento aleatorio\ndurante 10 seg', key: 'Trampa' },
+      { icon: '💀', name: 'Maldicion', desc: 'Aleatoria: aleatorio\no caminar inverso (10 seg)', key: 'Trampa' },
       { icon: '🌀', name: 'Enganche', desc: 'Al moverte saldras\ndisparado hasta la pared', key: 'Trampa' },
     ];
 
