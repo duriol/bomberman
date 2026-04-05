@@ -4,6 +4,7 @@ import {
   CHARACTER_DEFS,
 } from '../data/constants.js';
 import { preloadCharacterSets, normalizeCharacterId } from '../utils/CharacterAssets.js';
+import { audioManager } from '../systems/AudioManager.js';
 
 /**
  * MenuScene - online-first home screen.
@@ -20,6 +21,11 @@ export class MenuScene extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     const cx = width / 2;
+
+    // Desbloqueo de audio en móviles: primer toque en pantalla
+    this.input.once('pointerdown', () => {
+      audioManager.init();
+    });
 
     this._localProfiles = [
       { name: 'Jugador 1', characterId: DEFAULT_CHARACTER_ID },
