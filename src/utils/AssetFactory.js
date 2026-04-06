@@ -361,13 +361,16 @@ function generateItems(scene) {
     ctx.fillStyle = cfg.labelColor;
     ctx.fillText(cfg.label, T / 2, T * 0.72);
 
-    scene.textures.addCanvas(`item_${name}`, canvas);
+    if (!scene.textures.exists(`item_${name}`)) {
+      scene.textures.addCanvas(`item_${name}`, canvas);
+    }
   });
 }
 
 // ── Misc ─────────────────────────────────────────────────────────────────────
 
 function generateShadow(scene) {
+  if (scene.textures.exists('shadow')) return;
   const g = scene.make.graphics({ x: 0, y: 0, add: false });
   g.fillStyle(0x000000, 0.35);
   g.fillEllipse(T / 2, T / 2, T * 0.8, T * 0.3);
@@ -377,29 +380,35 @@ function generateShadow(scene) {
 
 function generateUI(scene) {
   // Heart icon for lives
-  const heart = scene.make.graphics({ x: 0, y: 0, add: false });
-  heart.fillStyle(0xff2244);
-  heart.fillCircle(7, 7, 6);
-  heart.fillCircle(17, 7, 6);
-  heart.fillTriangle(1, 9, 23, 9, 12, 22);
-  heart.generateTexture('ui_heart', 24, 24);
-  heart.destroy();
+  if (!scene.textures.exists('ui_heart')) {
+    const heart = scene.make.graphics({ x: 0, y: 0, add: false });
+    heart.fillStyle(0xff2244);
+    heart.fillCircle(7, 7, 6);
+    heart.fillCircle(17, 7, 6);
+    heart.fillTriangle(1, 9, 23, 9, 12, 22);
+    heart.generateTexture('ui_heart', 24, 24);
+    heart.destroy();
+  }
 
   // Bomb icon for HUD
-  const hbomb = scene.make.graphics({ x: 0, y: 0, add: false });
-  hbomb.fillStyle(0x111111);
-  hbomb.fillCircle(10, 12, 9);
-  hbomb.fillStyle(0xffff00);
-  hbomb.fillCircle(14, 4, 3);
-  hbomb.generateTexture('ui_bomb', 24, 24);
-  hbomb.destroy();
+  if (!scene.textures.exists('ui_bomb')) {
+    const hbomb = scene.make.graphics({ x: 0, y: 0, add: false });
+    hbomb.fillStyle(0x111111);
+    hbomb.fillCircle(10, 12, 9);
+    hbomb.fillStyle(0xffff00);
+    hbomb.fillCircle(14, 4, 3);
+    hbomb.generateTexture('ui_bomb', 24, 24);
+    hbomb.destroy();
+  }
 
   // Fire icon
-  const hfire = scene.make.graphics({ x: 0, y: 0, add: false });
-  hfire.fillStyle(0xff6600);
-  hfire.fillTriangle(12, 2, 2, 22, 22, 22);
-  hfire.fillStyle(0xffff00);
-  hfire.fillTriangle(12, 6, 5, 20, 19, 20);
-  hfire.generateTexture('ui_fire', 24, 24);
-  hfire.destroy();
+  if (!scene.textures.exists('ui_fire')) {
+    const hfire = scene.make.graphics({ x: 0, y: 0, add: false });
+    hfire.fillStyle(0xff6600);
+    hfire.fillTriangle(12, 2, 2, 22, 22, 22);
+    hfire.fillStyle(0xffff00);
+    hfire.fillTriangle(12, 6, 5, 20, 19, 20);
+    hfire.generateTexture('ui_fire', 24, 24);
+    hfire.destroy();
+  }
 }

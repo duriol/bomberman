@@ -99,6 +99,8 @@ export class Player {
     this._abilityCooldownMs = Math.max(0, Number(this.characterDef.abilityCooldownMs || 0));
     this._abilityCooldownRemaining = Math.max(0, Number(this.characterDef.abilityInitialCooldownMs || 0));
 
+    this._foxyAbilityActive = true;
+
     const fallbackIdle = getCharacterIdleKey(DEFAULT_CHARACTER_ID, 'down');
     const initialIdle = getCharacterIdleKey(this.characterId, 'down');
     const initialTexture = scene.textures.exists(initialIdle) ? initialIdle : fallbackIdle;
@@ -238,6 +240,12 @@ export class Player {
   }
 
   _tryActivateCharacterAbility() {
+    if (this.characterId === 'foxy') {
+      this._foxyAbilityActive = !this._foxyAbilityActive;
+      this.refreshAbilityStatus();
+      return;
+    }
+    // ...existing code for otros personajes...
     if (this.characterId !== 'bomby' && this.characterId !== 'will-e') return;
     if (this._abilityCooldownRemaining > 0) return;
     if (!this.alive || !this.sprite.active) return;
@@ -299,6 +307,16 @@ export class Player {
 
     this.abilityLabel.setAlpha(this.label.alpha);
 
+    if (this.characterId === 'foxy') {
+      if (this._foxyAbilityActive) {
+        this.abilityLabel.setText('TRASPASAR: ON');
+        this.abilityLabel.setStyle({ color: '#66ff9c', backgroundColor: '#0d2a18', fontSize: '9px', fontFamily: 'monospace', padding: { x: 3, y: 1 } });
+      } else {
+        this.abilityLabel.setText('TRASPASAR: OFF');
+        this.abilityLabel.setStyle({ color: '#ff6666', backgroundColor: '#2a0d0d', fontSize: '9px', fontFamily: 'monospace', padding: { x: 3, y: 1 } });
+      }
+      return;
+    }
     if (this._abilityCooldownRemaining > 0) {
       const seconds = Math.max(1, Math.ceil(this._abilityCooldownRemaining / 1000));
       const statusKey = `cd:${seconds}`;
@@ -360,6 +378,7 @@ export class Player {
 
     const actionInput = this._normalizeActionInput(input);
 
+    // Foxy activa/desactiva habilidad con botón 1
     if (actionInput.action1Just) this._tryActivateCharacterAbility();
 
     // Action 3 = item action (multi-bomb for now)
@@ -563,15 +582,14 @@ export class Player {
     }
 
     // Kick bombs on blocked axis
-    if (this.stats.kick) {
+    if (this.stats.kick && !(this.characterId === 'foxy' && this._foxyAbilityActive)) {
       if (finalX === prevX && vx !== 0) {
         const kdx = Math.sign(vx);
         const { col, row } = this.tilePos;
         const kCol = col + kdx;
         // Search in the 2 tiles ahead (handles position rounding edge cases)
         const bomb = this.bombManager.bombs.get(`${kCol},${row}`)
-          || this.bombManager.bombs.get(`${kCol + kdx},${row}`)
-          || this.bombManager.bombs.get(`${col},${row}`);
+          || this.bombManager.bombs.get(`${kCol + kdx},${row}`);
         if (bomb && !bomb.exploded) {
           if (this.scene.isOnlineClient) {
             this._pendingKick = { dx: kdx, dy: 0, col: bomb.col - kdx, row: bomb.row };
@@ -596,8 +614,7 @@ export class Player {
         const { col, row } = this.tilePos;
         const kRow = row + kdy;
         const bomb = this.bombManager.bombs.get(`${col},${kRow}`)
-          || this.bombManager.bombs.get(`${col},${kRow + kdy}`)
-          || this.bombManager.bombs.get(`${col},${row}`);
+          || this.bombManager.bombs.get(`${col},${kRow + kdy}`);
         if (bomb && !bomb.exploded) {
           if (this.scene.isOnlineClient) {
             this._pendingKick = { dx: 0, dy: kdy, col: bomb.col, row: bomb.row - kdy };
@@ -651,47 +668,6 @@ export class Player {
     }
   }
 
-  _canPassBombs() {
-    return this.characterId === 'wolf';
-  }
-
-  /**
-   * Circular hitbox vs tile-grid collision.
-   * Tests a circle of radius r centered at (x, y) against all solid tiles
-   * using the closest-point-on-AABB method.
-   */
-  _canMoveCircle(x, y, r) {
-    const col0 = Math.floor((x - r) / TILE_SIZE);
-    const col1 = Math.floor((x + r) / TILE_SIZE);
-    const row0 = Math.floor((y - r) / TILE_SIZE);
-    const row1 = Math.floor((y + r) / TILE_SIZE);
-    // Inset for wall tiles � creates rounded-corner feel so players glide around wall corners
-    const WALL_PAD = 4;
-    for (let row = row0; row <= row1; row++) {
-      for (let col = col0; col <= col1; col++) {
-        const tileType = this.map[row]?.[col];
-        const bombBlocked = !this._canPassBombs()
-          && this.bombManager.hasBombAt(col, row)
-          && !this._passableBombs.has(`${col},${row}`);
-        const solid = (tileType === TILE.WALL || tileType === TILE.BLOCK) || bombBlocked;
-        if (!solid) continue;
-        // Wall tiles use inset AABB so corners are passable (rounded feel)
-        // Destructible blocks and bombs keep full AABB for exact collisions
-        const pad = tileType === TILE.WALL ? WALL_PAD : 0;
-        const nearX = Phaser.Math.Clamp(x, col * TILE_SIZE + pad, (col + 1) * TILE_SIZE - pad);
-        const nearY = Phaser.Math.Clamp(y, row * TILE_SIZE + pad, (row + 1) * TILE_SIZE - pad);
-        const dx = x - nearX;
-        const dy = y - nearY;
-        if (dx * dx + dy * dy < r * r) return false;
-      }
-    }
-    return true;
-  }
-
-  /**
-   * Moves coord toward the nearest tile center by at most maxStep.
-   * Used for corridor-entry assist when cardinal movement is blocked.
-   */
   _snapToCenter(coord, T, maxStep) {
     const tile = Math.floor(coord / T);
     const c1 = tile * T + T / 2;
@@ -709,6 +685,36 @@ export class Player {
     const dx = px - nearX;
     const dy = py - nearY;
     return dx * dx + dy * dy < r * r;
+  }
+
+  _canMoveCircle(px, py, r) {
+    const startCol = Math.floor((px - r) / TILE_SIZE);
+    const endCol = Math.floor((px + r) / TILE_SIZE);
+    const startRow = Math.floor((py - r) / TILE_SIZE);
+    const endRow = Math.floor((py + r) / TILE_SIZE);
+    for (let row = startRow; row <= endRow; row++) {
+      for (let col = startCol; col <= endCol; col++) {
+        const tile = this.map[row]?.[col];
+        if (tile !== 0 && tile !== 3) {
+          if (this._overlapsCircle(px, py, r, col, row)) {
+            return false;
+          }
+        }
+      }
+    }
+    // Check for bombs, unless Foxy with ability active
+    if (!(this.characterId === 'foxy' && this._foxyAbilityActive)) {
+      for (let row = startRow; row <= endRow; row++) {
+        for (let col = startCol; col <= endCol; col++) {
+          if (this.bombManager.hasBombAt(col, row) && !this._passableBombs.has(`${col},${row}`)) {
+            if (this._overlapsCircle(px, py, r, col, row)) {
+              return false;
+            }
+          }
+        }
+      }
+    }
+    return true;
   }
 
   _tryPlaceBomb() {
