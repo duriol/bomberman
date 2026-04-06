@@ -39,24 +39,24 @@ export const PLAYER_COLORS = [
   { main: 0xffaa00, shadow: 0xcc6600, label: 'Yellow', keys: 'TFGH+R'           },
 ];
 
-export const DEFAULT_CHARACTER_ID = 'wolf';
+export const DEFAULT_CHARACTER_ID = 'foxy';
 
-export const CHARACTER_IDS = ['wolf', 'bomby', 'bony', 'will-e'];
+export const CHARACTER_IDS = ['foxy', 'bomby', 'bony', 'will-e'];
 
 export const CHARACTER_DEFS = {
-  wolf: {
-    id: 'wolf',
-    label: 'Wolf',
-    folder: 'wolf',
+  foxy: {
+    id: 'foxy',
+    label: 'Foxy',
+    folder: 'foxy',
     idle: {
-      down: 'wolf_idle_down',
-      right: 'wolf_idle_right',
-      up: 'wolf_idle_up',
+       down: 'foxy_idle_down',
+       right: 'foxy_idle_right',
+       up: 'foxy_idle_up',
     },
     walkBase: {
-      down: 'wolf_walk_down_',
-      right: 'wolf_walk_right_',
-      up: 'wolf_walk_up_',
+       down: 'foxy_walk_down_',
+       right: 'foxy_walk_right_',
+       up: 'foxy_walk_up_',
     },
     walkFrames: {
       down: 4,
@@ -66,7 +66,7 @@ export const CHARACTER_DEFS = {
     spriteHeight: 125,
     originY: 0.82,
     abilityName: 'Traspasar bombas',
-    abilityDesc: 'Wolf puede atravesar bombas como habilidad pasiva.',
+    abilityDesc: 'Foxy puede atravesar bombas como habilidad pasiva.',
     hasActiveAbility: false,
     abilityCooldownMs: 0,
     bombTexture: 'bomb',
