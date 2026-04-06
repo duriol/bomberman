@@ -55,16 +55,16 @@
 
       /* ── 8-direction pad ───────────────────────────────────────── */
       #joystick-zone {
-        width: 170px;
-        height: 170px;
+        width: 220px;
+        height: 220px;
         display: flex;
         align-items: center;
         justify-content: center;
       }
 
       #joystick-base {
-        width: 148px;
-        height: 148px;
+        width: 200px;
+        height: 200px;
         border-radius: 50%;
         background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.08), rgba(18,27,52,0.86));
         border: 2px solid rgba(185, 210, 255, 0.25);
@@ -123,8 +123,8 @@
       }
 
       #joystick-center {
-        width: 62px;
-        height: 62px;
+        width: 90px;
+        height: 90px;
         border-radius: 50%;
         background: radial-gradient(circle at 35% 35%, #1c273d, #060d1e);
         border: 2px solid rgba(219, 232, 255, 0.18);
@@ -172,16 +172,7 @@
         box-shadow: 0 2px 6px rgba(0,0,0,0.4);
       }
 
-      .mobile-btn::after {
-        content: attr(data-label);
-        position: absolute;
-        left: 50%;
-        top: calc(100% + 6px);
-        transform: translateX(-50%);
-        font-size: 10px;
-        color: rgba(220, 236, 255, 0.82);
-        letter-spacing: 0.3px;
-      }
+      /* .mobile-btn::after eliminado para quitar textos adicionales */
 
       #btn-a4 {
         left: 50%;
@@ -219,22 +210,22 @@
   <div id="mobile-controls">
     <div id="joystick-zone">
       <div id="joystick-base">
-        <div class="joystick-arrow" data-index="6" style="--tx: 0px; --ty: -58px; --rot: 0deg;"></div>
-        <div class="joystick-arrow" data-index="7" style="--tx: 41px; --ty: -41px; --rot: 45deg;"></div>
-        <div class="joystick-arrow" data-index="0" style="--tx: 58px; --ty: 0px; --rot: 90deg;"></div>
-        <div class="joystick-arrow" data-index="1" style="--tx: 41px; --ty: 41px; --rot: 135deg;"></div>
-        <div class="joystick-arrow" data-index="2" style="--tx: 0px; --ty: 58px; --rot: 180deg;"></div>
-        <div class="joystick-arrow" data-index="3" style="--tx: -41px; --ty: 41px; --rot: 225deg;"></div>
-        <div class="joystick-arrow" data-index="4" style="--tx: -58px; --ty: 0px; --rot: 270deg;"></div>
-        <div class="joystick-arrow" data-index="5" style="--tx: -41px; --ty: -41px; --rot: 315deg;"></div>
+        <div class="joystick-arrow" data-index="6" style="--tx: 0px; --ty: -90px; --rot: 0deg;"></div>
+        <div class="joystick-arrow" data-index="7" style="--tx: 64px; --ty: -64px; --rot: 45deg;"></div>
+        <div class="joystick-arrow" data-index="0" style="--tx: 90px; --ty: 0px; --rot: 90deg;"></div>
+        <div class="joystick-arrow" data-index="1" style="--tx: 64px; --ty: 64px; --rot: 135deg;"></div>
+        <div class="joystick-arrow" data-index="2" style="--tx: 0px; --ty: 90px; --rot: 180deg;"></div>
+        <div class="joystick-arrow" data-index="3" style="--tx: -64px; --ty: 64px; --rot: 225deg;"></div>
+        <div class="joystick-arrow" data-index="4" style="--tx: -90px; --ty: 0px; --rot: 270deg;"></div>
+        <div class="joystick-arrow" data-index="5" style="--tx: -64px; --ty: -64px; --rot: 315deg;"></div>
         <div id="joystick-center"></div>
       </div>
     </div>
     <div id="buttons-area">
-      <button class="mobile-btn" id="btn-a4" data-label="4 arriba">4</button>
-      <button class="mobile-btn" id="btn-a3" data-label="3 izquierda">3</button>
-      <button class="mobile-btn" id="btn-a2" data-label="2 derecha">2</button>
-      <button class="mobile-btn" id="btn-a1" data-label="1 abajo">1</button>
+      <button class="mobile-btn" id="btn-a4">4</button>
+      <button class="mobile-btn" id="btn-a3">3</button>
+      <button class="mobile-btn" id="btn-a2">2</button>
+      <button class="mobile-btn" id="btn-a1">1</button>
     </div>
   </div>
 
@@ -268,7 +259,7 @@
       var btnA4 = document.getElementById('btn-a4');
 
       var DEAD = 16;      // neutral center radius, px
-      var CENTER_DRIFT = 4;
+      var CENTER_DRIFT = 20;
       var DIAG = Math.SQRT1_2;
       var DIRS = [
         { up: false, down: false, left: false, right: true,  vx: 1,     vy: 0 },
