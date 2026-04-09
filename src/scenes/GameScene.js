@@ -15,7 +15,7 @@ import { networkManager } from '../systems/NetworkManager.js';
 import { EXPLOSION_DURATION } from '../data/constants.js';
 import { preloadCharacterSets, normalizeCharacterId } from '../utils/CharacterAssets.js';
 
-const WILL_E_MISSILE_TRAVEL_MS = 3000;
+const WILL_E_MISSILE_TRAVEL_MS = 2000;
 const WILL_E_MISSILE_RANGE = 1;
 
 export class GameScene extends Phaser.Scene {

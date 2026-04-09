@@ -21,22 +21,22 @@ export const TILE = {
 
 // Item types
 export const ITEM = {
-  BOMB_UP:    'bomb_up',     // +1 bomb capacity
-  FIRE_UP:    'fire_up',     // +1 explosion range
-  SPEED_UP:   'speed_up',    // +movement speed
-  MULTI_BOMB: 'multi_bomb',  // place all bombs in facing direction
-  KICK:       'kick',        // kick bombs
-  SKULL:      'skull',       // random curse: random movement or inverted movement
-  RUSH:       'rush',        // curse: locked direction at high speed until wall
+  BOMB_UP:    'bomb_up',     // +1 capacidad de bomba
+  FIRE_UP:    'fire_up',     // +1 radio de explosión
+  SPEED_UP:   'speed_up',    // +velocidad de movimiento
+  MULTI_BOMB: 'multi_bomb',  // colocar todas las bombas en dirección enfrentada
+  KICK:       'kick',        // patear bombas
+  SKULL:      'skull',       // maldición aleatoria: movimiento aleatorio o controles invertidos
+  RUSH:       'rush',        // maldición: dirección bloqueada a alta velocidad hasta pared
 };
 
 // Player colors (Bomberman 4 style)
 export const PLAYER_COLORS = [
   { main: 0xffffff, shadow: 0xaaaaaa, label: 'White',  keys: 'WASD + J/K/H/U'   },
   { main: 0x111199, shadow: 0x0000aa, label: 'Blue',   keys: "Arrows + ;/'/L/P" },
-  { main: 0xcc2222, shadow: 0x880000, label: 'Red',    keys: 'IJKL+U'          },
-  { main: 0x22aa22, shadow: 0x007700, label: 'Green',  keys: 'Numpad8456+0'     },
-  { main: 0xffaa00, shadow: 0xcc6600, label: 'Yellow', keys: 'TFGH+R'           },
+  { main: 0xcc2222, shadow: 0x880000, label: 'Red',    keys: 'IJKL + Y/U/H/J'  },
+  { main: 0x22aa22, shadow: 0x007700, label: 'Green',  keys: 'Numpad8456 + 2/6/4/8' },
+  { main: 0xffaa00, shadow: 0xcc6600, label: 'Yellow', keys: 'TFGH + V/B/N/M'  },
 ];
 
 export const DEFAULT_CHARACTER_ID = 'foxy';
@@ -120,11 +120,11 @@ export const CHARACTER_DEFS = {
     spriteHeight: 125,
     originY: 0.82,
     abilityName: 'Resurreccion',
-    abilityDesc: 'Ella resucita 3s despues de morir, queda invencible 2s y no suelta items.',
+    abilityDesc: 'Ella resucita 3s después de morir, queda invencible 1s y no suelta items.',
     hasActiveAbility: true,
-    abilityCooldownMs: 45000,
+    abilityCooldownMs: 50000,
     abilityReviveDelayMs: 3000,
-    abilityInvincibleMs: 2000,
+    abilityInvincibleMs: 1000,
     bombTexture: 'bomb',
   },
   'will-e': {
@@ -149,7 +149,7 @@ export const CHARACTER_DEFS = {
     spriteHeight: 125,
     originY: 0.82,
     abilityName: 'Misil teledirigido',
-    abilityDesc: 'Will-e lanza un misil al rival aleatorio; cae en 3s y explota con alcance 1.',
+    abilityDesc: 'Will-e lanza un misil al rival aleatorio; cae en 2s y explota con alcance 1.',
     hasActiveAbility: true,
     abilityInitialCooldownMs: 10000,
     abilityCooldownMs: 20000,

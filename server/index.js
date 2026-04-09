@@ -51,7 +51,7 @@ const io = new Server(httpServer, {
 // ── Room storage ──────────────────────────────────────────────────────────────
 // Map<roomCode, { host, players:[{socketId,clientId,playerIndex,name,characterId,wins}], started, lastWinnerIndex, lastWinnerName }>
 const rooms = new Map();
-const ALLOWED_CHARACTER_IDS = new Set(['wolf', 'bomby', 'bony', 'will-e']);
+const ALLOWED_CHARACTER_IDS = new Set(['foxy', 'bomby', 'bony', 'will-e']);
 
 function sanitizeName(name, fallback = 'Jugador') {
   const safe = String(name || '').trim().slice(0, 12);
@@ -61,7 +61,7 @@ function sanitizeName(name, fallback = 'Jugador') {
 
 function sanitizeCharacterId(characterId) {
   const id = String(characterId || '').trim().toLowerCase();
-  return ALLOWED_CHARACTER_IDS.has(id) ? id : 'wolf';
+  return ALLOWED_CHARACTER_IDS.has(id) ? id : 'foxy';
 }
 
 function sanitizeClientId(clientId, fallback = '') {
