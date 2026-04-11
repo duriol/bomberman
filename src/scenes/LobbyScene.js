@@ -519,7 +519,7 @@ export class LobbyScene extends Phaser.Scene {
     this._editCharacterDraft = normalizeCharacterId(this._selectedCharacterId || DEFAULT_CHARACTER_ID);
 
     const parts = [];
-    const cards = new Map();
+    const gridSlots = [];
 
     const dim = this.add.graphics().setDepth(300);
     dim.fillStyle(0x000000, 0.72);
@@ -527,7 +527,7 @@ export class LobbyScene extends Phaser.Scene {
     parts.push(dim);
 
     const panelW = Math.min(W - 32, 680);
-    const panelH = 390;
+    const panelH = 470;
     const px = CX - panelW / 2;
     const py = H / 2 - panelH / 2;
 
@@ -574,81 +574,203 @@ export class LobbyScene extends Phaser.Scene {
     });
     parts.push(btnName);
 
-    const subtitle = this.add.text(CX, py + 102, 'Selecciona personaje', {
-      fontSize: '12px', fontFamily: 'monospace', color: '#8fd8ff',
+    const selectedLabel = this.add.text(CX, py + 102, 'PERSONAJE SELECCIONADO', {
+      fontSize: '11px', fontFamily: 'monospace', color: '#8fd8ff',
     }).setOrigin(0.5).setDepth(302);
-    parts.push(subtitle);
+    parts.push(selectedLabel);
 
-    const cardCount = CHARACTER_IDS.length;
-    const gap = 14;
-    const sidePadding = 18;
-    const maxCardW = 270;
-    const cardW = Math.min(
-      maxCardW,
-      Math.floor((panelW - sidePadding * 2 - gap * (cardCount - 1)) / cardCount),
-    );
-    const cardH = 200;
-    const compactCards = cardW < 220;
-    const cardStartX = CX - (cardW * cardCount + gap * (cardCount - 1)) / 2;
-    const cardY = py + 122;
+    const previewX = px + 18;
+    const previewY = py + 114;
+    const previewW = panelW - 36;
+    const previewH = 150;
 
-    const refreshCardStyles = () => {
-      for (const [id, c] of cards) {
-        const selected = id === this._editCharacterDraft;
-        c.bg.clear();
-        c.bg.fillStyle(selected ? 0x194564 : 0x122a41, 0.96);
-        c.bg.fillRoundedRect(c.x, c.y, cardW, cardH, 10);
-        c.bg.lineStyle(2, selected ? 0x8ff7ff : 0x2d7ea2, selected ? 1 : 0.6);
-        c.bg.strokeRoundedRect(c.x, c.y, cardW, cardH, 10);
-      }
-    };
+    const previewFrame = this.add.graphics().setDepth(302);
+    previewFrame.fillStyle(0x10283f, 0.95);
+    previewFrame.fillRoundedRect(previewX, previewY, previewW, previewH, 10);
+    previewFrame.lineStyle(2, 0x2d7ea2, 0.75);
+    previewFrame.strokeRoundedRect(previewX, previewY, previewW, previewH, 10);
+    parts.push(previewFrame);
 
-    CHARACTER_IDS.forEach((id, idx) => {
-      const x = cardStartX + idx * (cardW + gap);
-      const y = cardY;
-      const def = CHARACTER_DEFS[id];
+    const previewSprite = this.add.sprite(previewX + 72, previewY + previewH / 2, CHARACTER_DEFS[this._editCharacterDraft].idle.down)
+      .setDepth(303);
+    parts.push(previewSprite);
 
-      const bg = this.add.graphics().setDepth(302);
+    const previewName = this.add.text(previewX + 138, previewY + 16, '', {
+      fontSize: '20px', fontFamily: 'monospace', color: '#e8f7ff', fontStyle: 'bold',
+    }).setDepth(303);
+    parts.push(previewName);
+
+    const previewAbility = this.add.text(previewX + 138, previewY + 48, '', {
+      fontSize: '12px', fontFamily: 'monospace', color: '#9de5ff',
+    }).setDepth(303);
+    parts.push(previewAbility);
+
+    const previewDesc = this.add.text(previewX + 138, previewY + 70, '', {
+      fontSize: '10px', fontFamily: 'monospace', color: '#c8e8ff',
+      wordWrap: { width: previewW - 156 },
+      lineSpacing: 2,
+    }).setDepth(303);
+    parts.push(previewDesc);
+
+    const gridTitle = this.add.text(CX, previewY + previewH + 14, 'TODOS LOS PERSONAJES', {
+      fontSize: '11px', fontFamily: 'monospace', color: '#8fd8ff',
+    }).setOrigin(0.5, 0).setDepth(302);
+    parts.push(gridTitle);
+
+    const gridX = previewX;
+    const gridY = previewY + previewH + 32;
+    const gridW = previewW;
+    const gridH = 126;
+
+    const gridFrame = this.add.graphics().setDepth(302);
+    gridFrame.fillStyle(0x0f2235, 0.95);
+    gridFrame.fillRoundedRect(gridX, gridY, gridW, gridH, 10);
+    gridFrame.lineStyle(1, 0x2d7ea2, 0.65);
+    gridFrame.strokeRoundedRect(gridX, gridY, gridW, gridH, 10);
+    parts.push(gridFrame);
+
+    const cols = Math.max(3, Math.min(5, Math.floor((gridW - 32) / 118)));
+    const rows = 2;
+    const pageSize = cols * rows;
+    const cellGap = 8;
+    const innerPad = 10;
+    const cellW = Math.floor((gridW - innerPad * 2 - cellGap * (cols - 1)) / cols);
+    const cellH = Math.floor((gridH - innerPad * 2 - cellGap * (rows - 1)) / rows);
+    let pageIndex = 0;
+
+    const totalPages = () => Math.max(1, Math.ceil(CHARACTER_IDS.length / pageSize));
+
+    const pageLabel = this.add.text(CX, gridY + gridH + 10, '', {
+      fontSize: '10px', fontFamily: 'monospace', color: '#7fb7d5',
+    }).setOrigin(0.5, 0).setDepth(303);
+    parts.push(pageLabel);
+
+    const btnPrevPage = this._makeBtn(CX - 112, gridY + gridH + 19, '<', '#24435e', '#346285').setDepth(303);
+    btnPrevPage.setScale(0.75);
+    parts.push(btnPrevPage);
+
+    const btnNextPage = this._makeBtn(CX + 112, gridY + gridH + 19, '>', '#24435e', '#346285').setDepth(303);
+    btnNextPage.setScale(0.75);
+    parts.push(btnNextPage);
+
+    for (let i = 0; i < pageSize; i++) {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      const x = gridX + innerPad + col * (cellW + cellGap);
+      const y = gridY + innerPad + row * (cellH + cellGap);
+
+      const bg = this.add.graphics().setDepth(303);
       parts.push(bg);
 
-      const zone = this.add.zone(x + cardW / 2, y + cardH / 2, cardW, cardH)
-        .setDepth(303)
+      const zone = this.add.zone(x + cellW / 2, y + cellH / 2, cellW, cellH)
+        .setDepth(304)
         .setInteractive({ useHandCursor: true });
       zone.on('pointerdown', (_pointer, _lx, _ly, event) => {
         event?.stopPropagation?.();
+        const id = zone.getData('characterId');
+        if (!id) return;
         this._editCharacterDraft = id;
-        refreshCardStyles();
+        refreshPreview();
+        refreshGrid();
       });
       parts.push(zone);
 
-      const nameTxt = this.add.text(x + cardW / 2, y + 14, def.label.toUpperCase(), {
-        fontSize: '16px', fontFamily: 'monospace', color: '#e8f7ff',
-      }).setOrigin(0.5, 0).setDepth(303);
-      parts.push(nameTxt);
+      const label = this.add.text(x + cellW / 2, y + 7, '', {
+        fontSize: '9px', fontFamily: 'monospace', color: '#dff5ff',
+      }).setOrigin(0.5, 0).setDepth(304);
+      parts.push(label);
 
-      const idleSpriteKey = def.idle?.down;
-      const sprite = this.add.sprite(x + cardW / 2, y + 78, idleSpriteKey).setDepth(303);
-      const src = this.textures.get(idleSpriteKey)?.getSourceImage?.();
-      const h = src?.height || 125;
-      sprite.setScale((compactCards ? 56 : 64) / h);
+      const sprite = this.add.sprite(x + cellW / 2, y + cellH - 19, CHARACTER_DEFS[DEFAULT_CHARACTER_ID].idle.down)
+        .setDepth(304);
       parts.push(sprite);
 
-      const abilityName = this.add.text(x + 12, y + 120, def.abilityName, {
-        fontSize: compactCards ? '11px' : '12px', fontFamily: 'monospace', color: '#9de5ff',
-      }).setDepth(303);
-      parts.push(abilityName);
+      gridSlots.push({ bg, zone, label, sprite, x, y });
+    }
 
-      const abilityDesc = this.add.text(x + 12, y + 142, def.abilityDesc, {
-        fontSize: compactCards ? '9px' : '10px', fontFamily: 'monospace', color: '#c8e8ff',
-        wordWrap: { width: cardW - 24 },
-        lineSpacing: 2,
-      }).setDepth(303);
-      parts.push(abilityDesc);
+    const refreshPreview = () => {
+      const def = CHARACTER_DEFS[this._editCharacterDraft] || CHARACTER_DEFS[DEFAULT_CHARACTER_ID];
+      const idleKey = def.idle?.down;
+      if (idleKey && previewSprite.texture?.key !== idleKey) {
+        previewSprite.setTexture(idleKey);
+      }
+      const src = this.textures.get(idleKey)?.getSourceImage?.();
+      const h = src?.height || def.spriteHeight || 125;
+      previewSprite.setScale(104 / h);
+      previewName.setText(`${def.label.toUpperCase()}  [${def.id.toUpperCase()}]`);
+      previewAbility.setText(def.abilityName || 'Sin habilidad activa');
+      previewDesc.setText(def.abilityDesc || 'Sin descripcion disponible.');
+    };
 
-      cards.set(id, { bg, x, y });
+    const refreshGrid = () => {
+      const pages = totalPages();
+      if (pageIndex < 0) pageIndex = 0;
+      if (pageIndex >= pages) pageIndex = pages - 1;
+
+      const pageStart = pageIndex * pageSize;
+      for (let i = 0; i < gridSlots.length; i++) {
+        const slot = gridSlots[i];
+        const id = CHARACTER_IDS[pageStart + i];
+        if (!id) {
+          slot.zone.setData('characterId', null);
+          slot.bg.setVisible(false);
+          slot.zone.setVisible(false);
+          slot.label.setVisible(false);
+          slot.sprite.setVisible(false);
+          continue;
+        }
+
+        const def = CHARACTER_DEFS[id];
+        const selected = id === this._editCharacterDraft;
+        slot.zone.setData('characterId', id);
+        slot.bg.clear();
+        slot.bg.fillStyle(selected ? 0x194564 : 0x122a41, 0.98);
+        slot.bg.fillRoundedRect(slot.x, slot.y, cellW, cellH, 8);
+        slot.bg.lineStyle(2, selected ? 0x8ff7ff : 0x2d7ea2, selected ? 1 : 0.6);
+        slot.bg.strokeRoundedRect(slot.x, slot.y, cellW, cellH, 8);
+        slot.bg.setVisible(true);
+        slot.zone.setVisible(true);
+
+        slot.label
+          .setText(def.label.toUpperCase())
+          .setPosition(slot.x + cellW / 2, slot.y + 7)
+          .setVisible(true);
+
+        const idleKey = def.idle?.down;
+        if (idleKey && slot.sprite.texture?.key !== idleKey) {
+          slot.sprite.setTexture(idleKey);
+        }
+        const src = this.textures.get(idleKey)?.getSourceImage?.();
+        const h = src?.height || def.spriteHeight || 125;
+        slot.sprite
+          .setPosition(slot.x + cellW / 2, slot.y + cellH - 18)
+          .setScale(46 / h)
+          .setVisible(true);
+      }
+
+      pageLabel.setText(pages > 1
+        ? `Pagina ${pageIndex + 1}/${pages}  -  ${CHARACTER_IDS.length} personajes`
+        : `${CHARACTER_IDS.length} personajes disponibles`);
+
+      btnPrevPage.setVisible(pages > 1);
+      btnNextPage.setVisible(pages > 1);
+    };
+
+    const selectedIndex = Math.max(0, CHARACTER_IDS.indexOf(this._editCharacterDraft));
+    pageIndex = Math.floor(selectedIndex / pageSize);
+
+    btnPrevPage.on('pointerdown', (_pointer, _lx, _ly, event) => {
+      event?.stopPropagation?.();
+      pageIndex = Math.max(0, pageIndex - 1);
+      refreshGrid();
+    });
+    btnNextPage.on('pointerdown', (_pointer, _lx, _ly, event) => {
+      event?.stopPropagation?.();
+      pageIndex = Math.min(totalPages() - 1, pageIndex + 1);
+      refreshGrid();
     });
 
-    refreshCardStyles();
+    refreshPreview();
+    refreshGrid();
 
     const btnCancel = this._makeBtn(CX - 94, py + panelH - 28, 'CANCELAR', '#534014', '#7b5e1f').setDepth(302);
     btnCancel.setScale(0.88);
@@ -699,7 +821,7 @@ export class LobbyScene extends Phaser.Scene {
       Phaser.Geom.Rectangle.Contains,
     ).on('pointerdown', () => this._closeEditModal());
 
-    this._editModal = { parts, cards, nameValue };
+    this._editModal = { parts, nameValue };
   }
 
   _closeEditModal() {
