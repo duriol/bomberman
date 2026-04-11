@@ -854,6 +854,7 @@ export class Player {
       this._bombyAbilityBombKey = null;
       this._bombyImmuneBomb = false;
       this._setBombyTransformedVisual(false);
+      if (this.alive) this._activateTemporaryInvincibility(500);
     }
   }
 

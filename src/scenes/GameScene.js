@@ -58,7 +58,7 @@ export class GameScene extends Phaser.Scene {
 
     // Build map — use seeded RNG when in online mode so all clients share same map
     const rng = this._seed !== null ? createRng(this._seed) : Math.random;
-    this.map     = generateMap(0.72, rng);
+    this.map     = generateMap(0.8, rng);
     this.tilemap = [];
 
     // Online host: track map changes for diff broadcast
@@ -1194,6 +1194,7 @@ export class GameScene extends Phaser.Scene {
       this.time.delayedCall(250, () => {
         if (this._gameOver) return;
         this.map[row][col] = TILE.WALL;
+        audioManager.playMapCloseHit();
         this._drawTile(col, row);
         if (this.isOnlineHost && this._lastSentMap) {
           this._lastSentMap[row][col] = -1;
@@ -1276,9 +1277,13 @@ export class GameScene extends Phaser.Scene {
         for (let c = 0; c < MAP_COLS; c++) {
           const next = Number(rowStr[c]);
           if (!Number.isFinite(next)) continue;
-          if (this.map[r]?.[c] !== next) {
+          const prev = this.map[r]?.[c];
+          if (prev !== next) {
             this.map[r][c] = next;
             this._drawTile(c, r);
+            if (this._spiralStarted && prev !== TILE.WALL && next === TILE.WALL) {
+              audioManager.playMapCloseHit();
+            }
           }
         }
       }
@@ -1287,9 +1292,13 @@ export class GameScene extends Phaser.Scene {
     // 2. Apply map diffs (blocks destroyed)
     if (state.md) {
       for (const { c, r, t } of state.md) {
-        if (this.map[r]?.[c] !== t) {
+        const prev = this.map[r]?.[c];
+        if (prev !== t) {
           this.map[r][c] = t;
           this._drawTile(c, r);
+          if (this._spiralStarted && prev !== TILE.WALL && t === TILE.WALL) {
+            audioManager.playMapCloseHit();
+          }
         }
       }
     }

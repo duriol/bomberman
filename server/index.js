@@ -242,19 +242,19 @@ io.on('connection', (socket) => {
     }));
     const playerNames = playerProfiles.map(p => p.name);
 
-    // Sanitise itemConfig: values must be non-negative integers, total capped at 30
+    // Sanitise itemConfig: values must be non-negative integers, total capped at 40
     const safeConfig = {};
     let configTotal = 0;
     if (itemConfig && typeof itemConfig === 'object') {
       const ALLOWED = ['bomb_up', 'fire_up', 'speed_up', 'multi_bomb', 'kick', 'skull', 'rush'];
       for (const key of ALLOWED) {
-        const v = Math.max(0, Math.min(30, Math.floor(Number(itemConfig[key]) || 0)));
+        const v = Math.max(0, Math.min(40, Math.floor(Number(itemConfig[key]) || 0)));
         safeConfig[key] = v;
         configTotal += v;
       }
       // Enforce total cap
-      if (configTotal > 30) {
-        const scale = 30 / configTotal;
+      if (configTotal > 40) {
+        const scale = 40 / configTotal;
         for (const key of Object.keys(safeConfig)) {
           safeConfig[key] = Math.floor(safeConfig[key] * scale);
         }

@@ -112,6 +112,46 @@ export class AudioManager {
     source.start();
   }
 
+  /** Spiral map close hit — short heavy impact */
+  playMapCloseHit() {
+    if (!this._enabled) return;
+
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const oscGain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(180, now);
+    osc.frequency.exponentialRampToValueAtTime(70, now + 0.09);
+    oscGain.gain.setValueAtTime(0.24, now);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    osc.connect(oscGain);
+    oscGain.connect(this.out);
+    osc.start(now);
+    osc.stop(now + 0.13);
+
+    const bufLen = Math.max(1, Math.floor(this.ctx.sampleRate * 0.06));
+    const buffer = this.ctx.createBuffer(1, bufLen, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / bufLen);
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(220, now);
+    filter.Q.value = 0.7;
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.12, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(this.out);
+    noise.start(now);
+    noise.stop(now + 0.09);
+  }
+
   /** Item pickup — bright ding */
   playItemPickup() {
     if (!this._enabled) return;

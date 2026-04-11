@@ -5,7 +5,7 @@ const W  = GAME_WIDTH;
 const H  = CANVAS_HEIGHT;
 const CX = W / 2;
 
-export const MAX_TOTAL_ITEMS = 30;
+export const MAX_TOTAL_ITEMS = 40;
 
 const ITEM_DEFS = [
   { type: ITEM.BOMB_UP,    label: 'Más Bombas',    desc: '+1 capacidad de bomba',          color: '#ff8844', default: 5 },
