@@ -774,6 +774,87 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  castDracarysFlame(owner) {
+    if (!owner || owner.characterId !== 'dracarys') return false;
+    if (this._gameOver) return false;
+
+    // Online clients are not authoritative for ability effects.
+    if (this.isOnlineClient) return false;
+
+    const { col: originCol, row: originRow } = owner.tilePos;
+    const facingDelta = {
+      up: [0, -1],
+      down: [0, 1],
+      left: [-1, 0],
+      right: [1, 0],
+    };
+    const [dc, dr] = facingDelta[owner._facing] || [0, 1];
+    const maxRange = Math.max(MAP_COLS, MAP_ROWS);
+    const tiles = [];
+
+    for (let i = 1; i <= maxRange; i++) {
+      const c = originCol + dc * i;
+      const r = originRow + dr * i;
+      if (c < 0 || c >= MAP_COLS || r < 0 || r >= MAP_ROWS) break;
+
+      const tile = this.map[r][c];
+      if (tile === TILE.WALL) break;
+
+      const nextC = c + dc;
+      const nextR = r + dr;
+      const nextOut = nextC < 0 || nextC >= MAP_COLS || nextR < 0 || nextR >= MAP_ROWS;
+      const nextTile = nextOut ? TILE.WALL : this.map[nextR][nextC];
+      const isEnd = i === maxRange || tile === TILE.BLOCK || nextOut || nextTile === TILE.WALL;
+
+      let type;
+      if (dc !== 0) {
+        type = isEnd ? (dc > 0 ? 'end_right' : 'end_left') : 'middle_h';
+      } else {
+        type = isEnd ? (dr > 0 ? 'end_down' : 'end_up') : 'middle_v';
+      }
+
+      tiles.push({ col: c, row: r, type });
+      if (tile === TILE.BLOCK) break;
+    }
+
+    if (!tiles.length) return false;
+
+    audioManager.playExplosion(maxRange);
+
+    const destroyedBlocks = [];
+    for (const { col, row } of tiles) {
+      if (this.map[row]?.[col] === TILE.BLOCK) {
+        this.map[row][col] = TILE.FLOOR;
+        audioManager.playBlockDestroyed();
+        destroyedBlocks.push({ col, row });
+      }
+    }
+
+    for (const { col, row, type } of tiles) {
+      this._spawnExplosionVisual(col, row, type);
+      if (this.bombManager.onExplosionHit) this.bombManager.onExplosionHit(col, row, owner);
+      const chainBomb = this.bombManager.bombs.get(`${col},${row}`);
+      if (chainBomb) this.time.delayedCall(80, () => chainBomb.detonate());
+    }
+
+    for (const { col, row } of destroyedBlocks) {
+      if (this.bombManager.onBlockDestroyed) this.bombManager.onBlockDestroyed(col, row);
+    }
+
+    if (this.isOnlineHost) {
+      this._eventBuffer.push({
+        t: 'explode',
+        col: originCol,
+        row: originRow,
+        range: maxRange,
+        pierce: false,
+        tiles,
+      });
+    }
+
+    return true;
+  }
+
   // ─── Update Loop ───────────────────────────────────────────────────────────
 
   update(time, delta) {
@@ -863,7 +944,7 @@ export class GameScene extends Phaser.Scene {
               stored.kc = undefined;
               stored.kr = undefined;
             }
-            if (input && input.x !== undefined) {
+            if (input && input.x !== undefined && !rp._isMovementLocked?.()) {
               rp.sprite.setPosition(input.x, input.y);
               rp._walkFrame = input.fr || 0;
 
@@ -880,13 +961,17 @@ export class GameScene extends Phaser.Scene {
                 rp._lastMoveVx = 0;
                 rp._lastMoveVy = 0;
               }
+            } else {
+              rp._lastMoveVx = 0;
+              rp._lastMoveVy = 0;
             }
             // Apply facing so multi-bomb fires in the correct direction
             if (input && input.fac) rp._facing = input.fac;
 
             if (rp.alive) {
+              const movementLocked = !!rp._isMovementLocked?.();
               const movedNow = !!(
-                (input && (input.mv || input.up || input.down || input.left || input.right))
+                !movementLocked && (input && (input.mv || input.up || input.down || input.left || input.right))
                 || Math.abs(rp._lastMoveVx) > 0.01
                 || Math.abs(rp._lastMoveVy) > 0.01
               );
@@ -1157,6 +1242,7 @@ export class GameScene extends Phaser.Scene {
         rv:  p._reverseControls || false,
         ra:  p._rushActive   || false,
         rp:  p._rushPending  || false,
+        dc:  p._dracarysCharging || false,
         ac:  Math.max(0, Math.ceil(p._abilityCooldownRemaining || 0)),
         ki:  p.stats.kick    || false,
         ms:  p.stats.multiStar || false,
@@ -1252,6 +1338,9 @@ export class GameScene extends Phaser.Scene {
         p._walkFrame = ps.fr || 0;
         if (p.characterId === 'bomby') {
           p.setBombyTransformState(!!ps.bt);
+        }
+        if (p.characterId === 'dracarys') {
+          p.setDracarysChargeState(!!ps.dc);
         }
 
         if (i !== this.myPlayerIndex) {

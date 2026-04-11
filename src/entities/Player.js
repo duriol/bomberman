@@ -91,6 +91,13 @@ export class Player {
     this._bombyAbilityBombKey = null;
     this._bombyImmuneBomb = false;
 
+    this._dracarysCharging = false;
+    this._dracarysChargeEvent = null;
+    this._dracarysSpinTween = null;
+    this._dracarysViewCycleEvent = null;
+    this._dracarysBaseScaleX = null;
+    this._dracarysBaseScaleY = null;
+
     this._bonyRevivePending = false;
     this._bonyReviveEvent = null;
     this._invincibilityTween = null;
@@ -220,6 +227,92 @@ export class Player {
     this.refreshAbilityStatus();
   }
 
+  _isMovementLocked() {
+    return this._bombyTransformed || this._dracarysCharging;
+  }
+
+  _setDracarysChargeTexture(facing) {
+    const key = getCharacterIdleKey(this.characterId, facing);
+    this.sprite.setFlipX(facing === 'left');
+    this.sprite.setTexture(key);
+  }
+
+  _setDracarysChargeVisual(active, durationMs = null) {
+    const next = !!active;
+    if (this._dracarysCharging === next && (!next || durationMs === null)) return;
+    this._dracarysCharging = next;
+
+    if (this._dracarysSpinTween) {
+      this._dracarysSpinTween.stop();
+      this._dracarysSpinTween.remove();
+      this._dracarysSpinTween = null;
+    }
+
+    if (this._dracarysViewCycleEvent) {
+      this._dracarysViewCycleEvent.remove(false);
+      this._dracarysViewCycleEvent = null;
+    }
+
+    if (next) {
+      const spinMs = Math.max(200, Number(durationMs || this.characterDef.abilityChargeMs || 1500));
+      this._walkFrame = 0;
+      this._setIdleTexture();
+      this.sprite.setVelocity(0, 0);
+      this.sprite.setAngle(0);
+
+      const fallbackScale = getCharacterScale(this.scene, this.characterId, this._facing || 'down');
+      const baseScaleX = Math.abs(this.sprite.scaleX) || fallbackScale;
+      const baseScaleY = Math.abs(this.sprite.scaleY) || fallbackScale;
+      this._dracarysBaseScaleX = baseScaleX;
+      this._dracarysBaseScaleY = baseScaleY;
+      this.sprite.setScale(baseScaleX, baseScaleY);
+
+      const viewOrder = ['down', 'right', 'up', 'left'];
+      const startIndex = Math.max(0, viewOrder.indexOf(this._facing));
+      let viewIndex = startIndex;
+      this._setDracarysChargeTexture(viewOrder[viewIndex]);
+
+      const viewStepMs = Math.max(90, Math.floor(spinMs / 6));
+      this._dracarysViewCycleEvent = this.scene.time.addEvent({
+        delay: viewStepMs,
+        loop: true,
+        callback: () => {
+          if (!this._dracarysCharging || !this.sprite?.active) return;
+          viewIndex = (viewIndex + 1) % viewOrder.length;
+          this._setDracarysChargeTexture(viewOrder[viewIndex]);
+        },
+      });
+
+      this._dracarysSpinTween = this.scene.tweens.add({
+        targets: this.sprite,
+        scaleX: baseScaleX * 0.78,
+        duration: Math.max(140, Math.floor(spinMs / 4)),
+        ease: 'Sine.easeInOut',
+        yoyo: true,
+        repeat: -1,
+      });
+    } else if (this.sprite?.active) {
+      this.sprite.setAngle(0);
+      const fallbackScale = getCharacterScale(this.scene, this.characterId, this._facing || 'down');
+      const baseScaleX = Math.abs(this._dracarysBaseScaleX || this.sprite.scaleX) || fallbackScale;
+      const baseScaleY = Math.abs(this._dracarysBaseScaleY || this.sprite.scaleY) || fallbackScale;
+      this.sprite.setScale(baseScaleX, baseScaleY);
+      this._setIdleTexture();
+      this._dracarysBaseScaleX = null;
+      this._dracarysBaseScaleY = null;
+    }
+
+    this.refreshAbilityStatus();
+  }
+
+  _cancelDracarysCharge() {
+    if (this._dracarysChargeEvent) {
+      this._dracarysChargeEvent.remove(false);
+      this._dracarysChargeEvent = null;
+    }
+    this._setDracarysChargeVisual(false);
+  }
+
   isImmuneToExplosion(owner) {
     if (this._bombyTransformed) return true;
     return owner === this && this._bombyImmuneBomb;
@@ -245,10 +338,31 @@ export class Player {
       this.refreshAbilityStatus();
       return;
     }
-    // ...existing code for otros personajes...
-    if (this.characterId !== 'bomby' && this.characterId !== 'will-e') return;
     if (this._abilityCooldownRemaining > 0) return;
     if (!this.alive || !this.sprite.active) return;
+
+    if (this.characterId === 'dracarys') {
+      if (this._dracarysCharging) return;
+
+      const chargeMs = Math.max(1, Number(this.characterDef.abilityChargeMs || 1500));
+      this._setDracarysChargeVisual(true, chargeMs);
+      this._abilityCooldownRemaining = this._abilityCooldownMs;
+      this.refreshAbilityStatus();
+
+      if (this._dracarysChargeEvent) this._dracarysChargeEvent.remove(false);
+      this._dracarysChargeEvent = this.scene.time.delayedCall(chargeMs, () => {
+        this._dracarysChargeEvent = null;
+        if (!this.alive || !this.sprite?.active) {
+          this._setDracarysChargeVisual(false);
+          return;
+        }
+        this.scene.castDracarysFlame?.(this);
+        this._setDracarysChargeVisual(false);
+      });
+      return;
+    }
+
+    if (this.characterId !== 'bomby' && this.characterId !== 'will-e') return;
 
     if (this.characterId === 'will-e') {
       const launched = !!this.scene.tryLaunchWillEMissile?.(this);
@@ -391,8 +505,10 @@ export class Player {
       this._tryPlaceBomb();
     }
 
-    if (!this._bombyTransformed) {
+    if (!this._isMovementLocked()) {
       this._handleMovement(delta, input);
+    }
+    if (!this._bombyTransformed) {
       this.setOverheadPosition(this.sprite.x, this.sprite.y);
     }
   }
@@ -443,7 +559,7 @@ export class Player {
   }
 
   _handleMovement(delta, input) {
-    if (this._bombyTransformed) return;
+    if (this._isMovementLocked()) return;
 
     const speed = this.stunned ? this.stats.speed * 2 : this.stats.speed;
     const R = Math.round(TILE_SIZE * 3 / 8); // 18 px
@@ -984,6 +1100,7 @@ export class Player {
     }
     audioManager.playPlayerDeath();
     this.alive = false;
+    this._cancelDracarysCharge();
     this._setBombyTransformedVisual(false);
     this._setDeadTexture();
     this.sprite.setAlpha(0.6);
@@ -1033,6 +1150,7 @@ export class Player {
     this.sprite.setPosition(pos.x, pos.y);
     this.setOverheadPosition(pos.x, pos.y);
     this._walkFrame = 0;
+    this._cancelDracarysCharge();
     this._setBombyTransformedVisual(false);
     this._setIdleTexture();
     this.sprite.setAlpha(1);
@@ -1054,6 +1172,16 @@ export class Player {
       this._bombyImmuneBomb = false;
     }
     this.refreshAbilityStatus();
+  }
+
+  setDracarysChargeState(active) {
+    if (this.characterId !== 'dracarys') return;
+    const next = !!active;
+    if (!next && this._dracarysChargeEvent) {
+      this._dracarysChargeEvent.remove(false);
+      this._dracarysChargeEvent = null;
+    }
+    this._setDracarysChargeVisual(next);
   }
 
   // -- Network interpolation (remote clients only) --------------------------
@@ -1082,7 +1210,7 @@ export class Player {
    * then smoothly lerps the sprite toward it to eliminate pop/teleportation.
    */
   interpolateToNetwork(delta) {
-    if (this._netBaseX === null || this._bombyTransformed) return;
+    if (this._netBaseX === null || this._isMovementLocked()) return;
 
     // Extrapolate forward from last snapshot (cap at 200 ms to avoid over-shooting)
     const elapsed = Math.min((performance.now() - this._netTimestamp) / 1000, 0.2);
@@ -1098,6 +1226,7 @@ export class Player {
   }
 
   destroy() {
+    this._cancelDracarysCharge();
     this._stopInvincibilityVisual();
     if (this._bonyReviveEvent) {
       this._bonyReviveEvent.remove(false);

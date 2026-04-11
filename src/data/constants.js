@@ -41,7 +41,7 @@ export const PLAYER_COLORS = [
 
 export const DEFAULT_CHARACTER_ID = 'foxy';
 
-export const CHARACTER_IDS = ['foxy', 'bomby', 'bony', 'will-e'];
+export const CHARACTER_IDS = ['foxy', 'bomby', 'bony', 'dracarys', 'will-e'];
 
 export const CHARACTER_DEFS = {
   foxy: {
@@ -125,6 +125,34 @@ export const CHARACTER_DEFS = {
     abilityCooldownMs: 50000,
     abilityReviveDelayMs: 3000,
     abilityInvincibleMs: 1000,
+    bombTexture: 'bomb',
+  },
+  dracarys: {
+    id: 'dracarys',
+    label: 'Dracarys',
+    folder: 'dracarys',
+    idle: {
+      down: 'dracarys_idle_down',
+      right: 'dracarys_idle_right',
+      up: 'dracarys_idle_up',
+    },
+    walkBase: {
+      down: 'dracarys_walk_down_',
+      right: 'dracarys_walk_right_',
+      up: 'dracarys_walk_up_',
+    },
+    walkFrames: {
+      down: 2,
+      up: 2,
+      right: 2,
+    },
+    spriteHeight: 125,
+    originY: 0.82,
+    abilityName: 'Lanza llamas',
+    abilityDesc: 'Gira 1.5s sobre eje Y mostrando las vistas del personaje y luego lanza fuego recto con alcance maximo en la direccion que mira.',
+    hasActiveAbility: true,
+    abilityChargeMs: 1500,
+    abilityCooldownMs: 20000,
     bombTexture: 'bomb',
   },
   'will-e': {
