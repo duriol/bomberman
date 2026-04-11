@@ -4,7 +4,7 @@ import {
   PLAYER_COLORS, SPAWN_POSITIONS, RESPAWN_DELAY,
   DEFAULT_CHARACTER_ID,
 } from '../data/constants.js';
-import { generateMap, createRng, tileToPixel } from '../utils/MapGenerator.js';
+import { generateMap, createRng, tileToPixel, pixelToTile } from '../utils/MapGenerator.js';
 import { generateAssets } from '../utils/AssetFactory.js';
 import { Player } from '../entities/Player.js';
 import { BombManager, calcExplosionTiles } from '../systems/BombManager.js';
@@ -17,6 +17,9 @@ import { preloadCharacterSets, normalizeCharacterId } from '../utils/CharacterAs
 
 const WILL_E_MISSILE_TRAVEL_MS = 2000;
 const WILL_E_MISSILE_RANGE = 1;
+const FROSTIK_SHOT_SPEED = 360;
+const FROSTIK_SHOT_RANGE_TILES = 7;
+const FROSTIK_FREEZE_MS = 3000;
 
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -44,6 +47,8 @@ export class GameScene extends Phaser.Scene {
     this._pendingLobbyData = null;
     this._willEMissiles = new Map();
     this._willEMissileSeq = 0;
+    this._frostikShots = new Map();
+    this._frostikShotSeq = 0;
   }
 
   preload() {
@@ -484,6 +489,7 @@ export class GameScene extends Phaser.Scene {
     this._winnerIndex = winner ? winner.index : -1;
     this._winnerName = winner ? (winner.displayName || `P${winner.index + 1}`) : '';
     this._spiralStarted = false;
+    this._clearFrostikShots();
     this._clearWillEMissiles();
     if (this._timerEvent) { this._timerEvent.remove(); this._timerEvent = null; }
     if (this._spiralEvent) { this._spiralEvent.remove(); this._spiralEvent = null; }
@@ -572,10 +578,511 @@ export class GameScene extends Phaser.Scene {
     this._unsubs.forEach(u => u());
     this._unsubs = [];
     if (this._spiralEvent) { this._spiralEvent.remove(); this._spiralEvent = null; }
+    this._clearFrostikShots();
     this._clearWillEMissiles();
     this.inputManager.destroy();
     this.bombManager.destroyAll();
     this.itemManager.destroyAll();
+  }
+
+  // ─── UFO Ability ──────────────────────────────────────────────────────────
+
+  _spawnUfoAbilityFrame(player, phase = 'start', durationMs = 500) {
+    if (!player?.sprite?.active) return;
+    const key = phase === 'end'
+      ? player.characterDef?.abilitySprites?.end
+      : player.characterDef?.abilitySprites?.start;
+    if (!key || !this.textures.exists(key)) return;
+
+    const fx = this.add.image(player.x, player.y, key).setDepth(18).setAlpha(0.95);
+    const source = this.textures.get(key)?.getSourceImage?.();
+    const h = source?.height || 96;
+    const scale = (TILE_SIZE * 1.35) / h;
+    fx.setScale(scale);
+
+    this.tweens.add({
+      targets: fx,
+      alpha: { from: 0.95, to: 0 },
+      scaleX: scale * 1.16,
+      scaleY: scale * 1.16,
+      duration: Math.max(200, Number(durationMs) || 500),
+      ease: 'Quad.Out',
+      onComplete: () => fx.destroy(),
+    });
+  }
+
+  _findFarthestUfoBomb(owner) {
+    let bestBomb = null;
+    let bestDistance = -1;
+
+    for (const bomb of this.bombManager.bombs.values()) {
+      if (!bomb || bomb.exploded) continue;
+      if (bomb._sliding || bomb._swapLocked) continue;
+      if (bomb.meta?.byAbility && bomb.meta?.characterId === 'bomby') continue;
+
+      const bombX = bomb.sprite?.x ?? tileToPixel(bomb.col, bomb.row, TILE_SIZE).x;
+      const bombY = bomb.sprite?.y ?? tileToPixel(bomb.col, bomb.row, TILE_SIZE).y;
+      const dist = Phaser.Math.Distance.Between(owner.x, owner.y, bombX, bombY);
+      if (dist <= bestDistance) continue;
+      bestDistance = dist;
+      bestBomb = bomb;
+    }
+
+    return bestBomb;
+  }
+
+  _runUfoSwapSequence(seq, broadcast = false) {
+    const owner = this.players[seq.ownerIndex];
+    if (!owner || !owner.sprite?.active) return false;
+
+    const bombKey = `${seq.bombCol},${seq.bombRow}`;
+    const localBomb = this.bombManager.bombs.get(bombKey) || null;
+    let bombEntry = null;
+    let bombSprite = null;
+
+    if (localBomb) {
+      localBomb.beginUfoSwapLock();
+      bombSprite = localBomb.sprite;
+    } else {
+      bombEntry = this._clientBombSprites?.get(bombKey) || null;
+      bombSprite = bombEntry?.sprite || null;
+      if (bombSprite?.active) this.tweens.killTweensOf(bombSprite);
+    }
+
+    owner.setUfoSwapState(true);
+    owner.sprite.setVelocity?.(0, 0);
+    owner.sprite.setPosition(seq.ownerStartX, seq.ownerStartY);
+    owner.setOverheadPosition(seq.ownerStartX, seq.ownerStartY);
+
+    if (bombSprite?.active) {
+      bombSprite.setPosition(seq.bombStartX, seq.bombStartY);
+    }
+
+    this._spawnUfoAbilityFrame(owner, 'start', seq.startMs);
+
+    this.time.delayedCall(seq.startMs, () => {
+      if (this._gameOver) return;
+      if (!owner?.sprite?.active) return;
+
+      this.tweens.add({
+        targets: owner.sprite,
+        x: seq.ownerTargetX,
+        y: seq.ownerTargetY,
+        duration: seq.travelMs,
+        ease: 'Sine.easeInOut',
+      });
+
+      if (bombSprite?.active) {
+        this.tweens.add({
+          targets: bombSprite,
+          x: seq.bombTargetX,
+          y: seq.bombTargetY,
+          duration: seq.travelMs,
+          ease: 'Sine.easeInOut',
+        });
+      }
+    });
+
+    this.time.delayedCall(seq.startMs + seq.travelMs, () => {
+      if (this._gameOver) return;
+      if (!owner?.sprite?.active) return;
+
+      owner.sprite.setPosition(seq.ownerTargetX, seq.ownerTargetY);
+      owner.setOverheadPosition(seq.ownerTargetX, seq.ownerTargetY);
+
+      if (localBomb && !localBomb.exploded) {
+        localBomb.endUfoSwapLock(seq.finalBombCol, seq.finalBombRow);
+
+        const finalBombKey = `${seq.finalBombCol},${seq.finalBombRow}`;
+        const R = Math.round(TILE_SIZE * 3 / 8);
+        for (const player of this.players || []) {
+          if (!player?._overlapsCircle) continue;
+          if (player._overlapsCircle(player.x, player.y, R, seq.finalBombCol, seq.finalBombRow)) {
+            player._passableBombs.add(finalBombKey);
+          }
+        }
+      } else if (bombSprite?.active) {
+        bombSprite.setPosition(seq.bombTargetX, seq.bombTargetY);
+        if (bombEntry && this._clientBombSprites) {
+          const oldKey = `${seq.bombCol},${seq.bombRow}`;
+          const newKey = `${seq.finalBombCol},${seq.finalBombRow}`;
+          if (oldKey !== newKey && this._clientBombSprites.get(oldKey) === bombEntry) {
+            this._clientBombSprites.delete(oldKey);
+            this._clientBombSprites.set(newKey, bombEntry);
+          }
+          if (this.bombManager?.remoteBombs) {
+            this.bombManager.remoteBombs.delete(oldKey);
+            this.bombManager.remoteBombs.add(newKey);
+          }
+          if (this.bombManager?.remoteBombTextureByKey) {
+            const texture = this.bombManager.remoteBombTextureByKey.get(oldKey) || bombEntry.textureKey || 'bomb';
+            this.bombManager.remoteBombTextureByKey.delete(oldKey);
+            this.bombManager.remoteBombTextureByKey.set(newKey, texture);
+          }
+        }
+      }
+
+      this._spawnUfoAbilityFrame(owner, 'end', seq.endMs);
+    });
+
+    this.time.delayedCall(seq.startMs + seq.travelMs + seq.endMs, () => {
+      if (!owner?.sprite?.active) return;
+      owner.setUfoSwapState(false);
+      owner.setOverheadPosition(owner.x, owner.y);
+    });
+
+    if (broadcast && this.isOnlineHost) {
+      this._eventBuffer.push({
+        t: 'ufo_swap',
+        pi: seq.ownerIndex,
+        bc: seq.bombCol,
+        br: seq.bombRow,
+        ox: Math.round(seq.ownerStartX),
+        oy: Math.round(seq.ownerStartY),
+        bx: Math.round(seq.bombStartX),
+        by: Math.round(seq.bombStartY),
+        tx: Math.round(seq.ownerTargetX),
+        ty: Math.round(seq.ownerTargetY),
+        tbx: Math.round(seq.bombTargetX),
+        tby: Math.round(seq.bombTargetY),
+        fbc: seq.finalBombCol,
+        fbr: seq.finalBombRow,
+        s0: seq.startMs,
+        s1: seq.travelMs,
+        s2: seq.endMs,
+      });
+    }
+
+    return true;
+  }
+
+  _runUfoSwapFromEvent(ev) {
+    const seq = {
+      ownerIndex: Number(ev.pi) || 0,
+      bombCol: Number(ev.bc) || 0,
+      bombRow: Number(ev.br) || 0,
+      ownerStartX: Number(ev.ox) || 0,
+      ownerStartY: Number(ev.oy) || 0,
+      bombStartX: Number(ev.bx) || 0,
+      bombStartY: Number(ev.by) || 0,
+      ownerTargetX: Number(ev.tx) || 0,
+      ownerTargetY: Number(ev.ty) || 0,
+      bombTargetX: Number(ev.tbx) || 0,
+      bombTargetY: Number(ev.tby) || 0,
+      finalBombCol: Number(ev.fbc) || 0,
+      finalBombRow: Number(ev.fbr) || 0,
+      startMs: Math.max(1, Number(ev.s0) || 500),
+      travelMs: Math.max(1, Number(ev.s1) || 2000),
+      endMs: Math.max(1, Number(ev.s2) || 500),
+    };
+    return this._runUfoSwapSequence(seq, false);
+  }
+
+  tryActivateUfoSwap(owner) {
+    if (!owner || owner.characterId !== 'ufo') return false;
+    if (this._gameOver) return false;
+    if (owner._ufoSwapping) return false;
+
+    // Online clients are not authoritative for ability effects.
+    if (this.isOnlineClient) return false;
+
+    const bomb = this._findFarthestUfoBomb(owner);
+    if (!bomb) return false;
+
+    const ownerTile = owner.tilePos;
+    const ownerTileBomb = this.bombManager.bombs.get(`${ownerTile.col},${ownerTile.row}`);
+    if (ownerTileBomb && ownerTileBomb !== bomb) return false;
+
+    const startMs = Math.max(1, Number(owner.characterDef?.abilitySwapStartMs || 500));
+    const travelMs = Math.max(1, Number(owner.characterDef?.abilitySwapTravelMs || 2000));
+    const endMs = Math.max(1, Number(owner.characterDef?.abilitySwapEndMs || 500));
+
+    const ownerStartX = owner.x;
+    const ownerStartY = owner.y;
+    const bombStartX = bomb.sprite?.x ?? tileToPixel(bomb.col, bomb.row, TILE_SIZE).x;
+    const bombStartY = bomb.sprite?.y ?? tileToPixel(bomb.col, bomb.row, TILE_SIZE).y;
+    const ownerTargetX = bombStartX;
+    const ownerTargetY = bombStartY;
+    const bombTargetX = ownerStartX;
+    const bombTargetY = ownerStartY;
+    const finalBombTile = pixelToTile(ownerStartX, ownerStartY, TILE_SIZE);
+
+    return this._runUfoSwapSequence({
+      ownerIndex: owner.index,
+      bombCol: bomb.col,
+      bombRow: bomb.row,
+      ownerStartX,
+      ownerStartY,
+      bombStartX,
+      bombStartY,
+      ownerTargetX,
+      ownerTargetY,
+      bombTargetX,
+      bombTargetY,
+      finalBombCol: finalBombTile.col,
+      finalBombRow: finalBombTile.row,
+      startMs,
+      travelMs,
+      endMs,
+    }, true);
+  }
+
+  // ─── Frostik Ability ─────────────────────────────────────────────────────
+
+  tryLaunchFrostikShot(owner) {
+    if (!owner || owner.characterId !== 'frostik') return false;
+    if (this._gameOver) return false;
+
+    // Online clients are not authoritative for ability effects.
+    if (this.isOnlineClient) return false;
+
+    const facingDelta = {
+      up: [0, -1],
+      down: [0, 1],
+      left: [-1, 0],
+      right: [1, 0],
+    };
+    const [dx, dy] = facingDelta[owner._facing] || [0, 1];
+    const speed = Math.max(120, Number(owner.characterDef?.abilityProjectileSpeed || FROSTIK_SHOT_SPEED));
+    const rangeTiles = Math.max(2, Number(owner.characterDef?.abilityProjectileRangeTiles || FROSTIK_SHOT_RANGE_TILES));
+    const maxDistance = rangeTiles * TILE_SIZE;
+    const startX = owner.x + dx * (TILE_SIZE * 0.34);
+    const startY = owner.y + dy * (TILE_SIZE * 0.34);
+    const id = `fk_${Math.round(this.time.now)}_${owner.index}_${this._frostikShotSeq++}`;
+
+    const created = this._createFrostikShot({
+      id,
+      ownerIndex: owner.index,
+      x: startX,
+      y: startY,
+      dx,
+      dy,
+      speed,
+      maxDistance,
+      resolveImpact: true,
+    });
+    if (!created) return false;
+
+    if (this.isOnlineHost) {
+      this._eventBuffer.push({
+        t: 'fk_shot',
+        id,
+        pi: owner.index,
+        sx: Math.round(startX),
+        sy: Math.round(startY),
+        dx,
+        dy,
+        sp: speed,
+        rg: maxDistance,
+      });
+    }
+
+    return true;
+  }
+
+  _createFrostikShot({
+    id,
+    ownerIndex,
+    x,
+    y,
+    dx,
+    dy,
+    speed,
+    maxDistance,
+    resolveImpact = false,
+  }) {
+    if (!id || this._frostikShots.has(id)) return false;
+
+    const glow = this.add.circle(x, y, 11, 0x8adfff, 0.34).setDepth(14);
+    const body = this.add.circle(x, y, 6, 0xe7faff, 1).setDepth(15);
+    const core = this.add.circle(x, y, 3, 0x5ec3ff, 1).setDepth(16);
+    const pulse = this.tweens.add({
+      targets: [glow, body],
+      scale: { from: 0.92, to: 1.2 },
+      duration: 120,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    this._frostikShots.set(id, {
+      id,
+      ownerIndex,
+      x,
+      y,
+      dx,
+      dy,
+      speed,
+      maxDistance,
+      traveled: 0,
+      resolveImpact,
+      glow,
+      body,
+      core,
+      pulse,
+    });
+    return true;
+  }
+
+  _isFrostikShotBlocked(x, y) {
+    const { col, row } = pixelToTile(x, y, TILE_SIZE);
+    if (col < 0 || col >= MAP_COLS || row < 0 || row >= MAP_ROWS) return true;
+    const tile = this.map[row]?.[col];
+    return tile === TILE.WALL || tile === TILE.BLOCK;
+  }
+
+  _findFrostikShotTarget(shot) {
+    const owner = this.players[shot.ownerIndex] || null;
+    const hitRadius = Math.max(8, Number(owner?.characterDef?.abilityHitRadiusPx || 18));
+
+    for (const player of this.players || []) {
+      if (!player || player === owner) continue;
+      if (!player.alive || !player.sprite?.active || !player.sprite.visible) continue;
+      if (player.respawnInvincible || player._ufoSwapInvulnerable) continue;
+
+      const dist = Phaser.Math.Distance.Between(shot.x, shot.y, player.x, player.y);
+      if (dist <= hitRadius) return player;
+    }
+
+    return null;
+  }
+
+  _spawnFrostikImpact(x, y, strong = false) {
+    const outer = this.add.circle(x, y, strong ? 16 : 11, 0x92e0ff, strong ? 0.5 : 0.38).setDepth(16);
+    const inner = this.add.circle(x, y, strong ? 8 : 6, 0xe9fcff, 0.95).setDepth(17);
+    const ring = this.add.circle(x, y, strong ? 13 : 9, 0x7cd2ff, 0).setDepth(16);
+    ring.setStrokeStyle(2, 0xdff7ff, 0.95);
+
+    this.tweens.add({
+      targets: [outer, inner, ring],
+      scale: { from: 0.55, to: strong ? 1.9 : 1.5 },
+      alpha: { from: 0.9, to: 0 },
+      duration: strong ? 360 : 280,
+      ease: 'Quad.Out',
+      onComplete: () => {
+        outer.destroy();
+        inner.destroy();
+        ring.destroy();
+      },
+    });
+
+    const shardCount = strong ? 7 : 4;
+    for (let i = 0; i < shardCount; i++) {
+      const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      const dist = Phaser.Math.Between(strong ? 14 : 9, strong ? 28 : 18);
+      const shard = this.add.rectangle(x, y, Phaser.Math.Between(5, 8), 2, 0xe7fbff, 0.95).setDepth(17);
+      shard.setRotation(angle);
+
+      this.tweens.add({
+        targets: shard,
+        x: x + Math.cos(angle) * dist,
+        y: y + Math.sin(angle) * dist,
+        alpha: 0,
+        scaleX: 0.3,
+        scaleY: 0.3,
+        duration: strong ? 300 : 220,
+        ease: 'Quad.Out',
+        onComplete: () => shard.destroy(),
+      });
+    }
+  }
+
+  _updateFrostikShots(delta) {
+    if (!this._frostikShots.size) return;
+
+    for (const shot of [...this._frostikShots.values()]) {
+      const step = shot.speed * (delta / 1000);
+      shot.x += shot.dx * step;
+      shot.y += shot.dy * step;
+      shot.traveled += step;
+
+      if (shot.body?.active) shot.body.setPosition(shot.x, shot.y);
+      if (shot.core?.active) shot.core.setPosition(shot.x, shot.y);
+      if (shot.glow?.active) shot.glow.setPosition(shot.x, shot.y);
+
+      const blocked = this._isFrostikShotBlocked(shot.x, shot.y);
+      if (blocked) {
+        if (shot.resolveImpact && this.isOnlineHost) {
+          this._eventBuffer.push({
+            t: 'fk_hit',
+            id: shot.id,
+            pi: shot.ownerIndex,
+            ti: -1,
+            ms: 0,
+            x: Math.round(shot.x),
+            y: Math.round(shot.y),
+          });
+        }
+        this._destroyFrostikShot(shot.id, shot.resolveImpact, false);
+        continue;
+      }
+
+      if (shot.resolveImpact && !this.isOnlineClient) {
+        const target = this._findFrostikShotTarget(shot);
+        if (target) {
+          const owner = this.players[shot.ownerIndex] || null;
+          const freezeMs = Math.max(250, Number(owner?.characterDef?.abilityFreezeMs || FROSTIK_FREEZE_MS));
+          target.applyFrostikFreeze?.(freezeMs);
+          shot.x = target.x;
+          shot.y = target.y;
+
+          if (this.isOnlineHost) {
+            this._eventBuffer.push({
+              t: 'fk_hit',
+              id: shot.id,
+              pi: shot.ownerIndex,
+              ti: target.index,
+              ms: freezeMs,
+              x: Math.round(shot.x),
+              y: Math.round(shot.y),
+            });
+          }
+
+          this._destroyFrostikShot(shot.id, true, true);
+          continue;
+        }
+      }
+
+      if (shot.traveled >= shot.maxDistance) {
+        if (shot.resolveImpact && this.isOnlineHost) {
+          this._eventBuffer.push({
+            t: 'fk_hit',
+            id: shot.id,
+            pi: shot.ownerIndex,
+            ti: -1,
+            ms: 0,
+            x: Math.round(shot.x),
+            y: Math.round(shot.y),
+          });
+        }
+        this._destroyFrostikShot(shot.id, shot.resolveImpact, false);
+      }
+    }
+  }
+
+  _destroyFrostikShot(id, spawnImpact = false, strongImpact = false) {
+    const shot = this._frostikShots.get(id);
+    if (!shot) return;
+
+    if (shot.pulse) {
+      shot.pulse.stop();
+      shot.pulse.remove();
+    }
+
+    if (spawnImpact) {
+      this._spawnFrostikImpact(shot.x, shot.y, strongImpact);
+    }
+
+    shot.glow?.destroy?.();
+    shot.body?.destroy?.();
+    shot.core?.destroy?.();
+    this._frostikShots.delete(id);
+  }
+
+  _clearFrostikShots() {
+    for (const id of [...this._frostikShots.keys()]) {
+      this._destroyFrostikShot(id, false, false);
+    }
   }
 
   // ─── Will-e Ability ───────────────────────────────────────────────────────
@@ -1065,6 +1572,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    this._updateFrostikShots(delta);
     this._updateWillEMissiles(delta);
     this._updateHUD();
   }
@@ -1293,6 +1801,9 @@ export class GameScene extends Phaser.Scene {
         y:   Math.round(p.y),
         ch:  p.characterId,
         bt:  p._bombyTransformed || false,
+        us:  p._ufoSwapping || false,
+        fz:  p._frostikFrozen || false,
+        ft:  Math.max(0, Math.ceil(p._frostikFreezeTimer || 0)),
         vx:  p._lastMoveVx || 0,
         vy:  p._lastMoveVy || 0,
         fd:  p._facing || 'down',
@@ -1380,6 +1891,8 @@ export class GameScene extends Phaser.Scene {
           audioManager.playPlayerDeath();
         } else if (ev.t === 'pickup') {
           audioManager.playItemPickup();
+        } else if (ev.t === 'ufo_swap') {
+          this._runUfoSwapFromEvent(ev);
         } else if (ev.t === 'wm_launch') {
           this._createWillEMissile({
             id: ev.id,
@@ -1393,6 +1906,30 @@ export class GameScene extends Phaser.Scene {
             durationMs: Math.max(1, Number(ev.ms) || WILL_E_MISSILE_TRAVEL_MS),
             resolveImpact: false,
           });
+        } else if (ev.t === 'fk_shot') {
+          this._createFrostikShot({
+            id: ev.id,
+            ownerIndex: Number(ev.pi) || 0,
+            x: Number(ev.sx) || 0,
+            y: Number(ev.sy) || 0,
+            dx: Number(ev.dx) || 0,
+            dy: Number(ev.dy) || 0,
+            speed: Math.max(100, Number(ev.sp) || FROSTIK_SHOT_SPEED),
+            maxDistance: Math.max(TILE_SIZE, Number(ev.rg) || FROSTIK_SHOT_RANGE_TILES * TILE_SIZE),
+            resolveImpact: false,
+          });
+        } else if (ev.t === 'fk_hit') {
+          this._destroyFrostikShot(ev.id, false, false);
+          const targetIndex = Number(ev.ti);
+          const target = Number.isFinite(targetIndex) && targetIndex >= 0 ? this.players[targetIndex] : null;
+          const freezeMs = Math.max(0, Number(ev.ms) || 0);
+          if (target && freezeMs > 0) {
+            target.applyFrostikFreeze?.(freezeMs);
+          }
+
+          const impactX = Number.isFinite(Number(ev.x)) ? Number(ev.x) : (target?.x || 0);
+          const impactY = Number.isFinite(Number(ev.y)) ? Number(ev.y) : (target?.y || 0);
+          this._spawnFrostikImpact(impactX, impactY, freezeMs > 0);
         } else if (ev.t === 'end' && !this._gameOver) {
           this._endRound(ev.wi >= 0 ? this.players[ev.wi] : null);
         }
@@ -1412,6 +1949,9 @@ export class GameScene extends Phaser.Scene {
         }
         if (p.characterId === 'dracarys') {
           p.setDracarysChargeState(!!ps.dc);
+        }
+        if (p.characterId === 'ufo') {
+          p.setUfoSwapState(!!ps.us);
         }
 
         if (i !== this.myPlayerIndex) {
@@ -1492,6 +2032,7 @@ export class GameScene extends Phaser.Scene {
         p._abilityCooldownRemaining = Math.max(0, Number(ps.ac || 0));
         p.stats.kick      = ps.ki || false;
         p.stats.multiStar = ps.ms || false;
+        p.setFrostikFreezeState(!!(ps.al && ps.fz), Number(ps.ft) || 0);
 
         // Reinit curse timers when host flips them on — without this the client
         // update() loop would see curseTimer=0 and immediately call _clearCurse().

@@ -88,5 +88,14 @@ export function preloadCharacterSets(scene, characterIds = CHARACTER_IDS) {
         }
       }
     });
+
+    if (def.abilitySprites && typeof def.abilitySprites === 'object') {
+      Object.values(def.abilitySprites).forEach((key) => {
+        if (!key) return;
+        if (!scene.textures.exists(key)) {
+          scene.load.image(key, `${folderBase}/${key}.png`);
+        }
+      });
+    }
   });
 }

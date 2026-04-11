@@ -42,29 +42,91 @@ class Bomb {
     this.textureKey = options.textureKey || 'bomb';
     this.meta = options.meta || null;
     this._kickBlocked = !!(this.meta?.byAbility && this.meta?.characterId === 'bomby');
+    this._swapLocked = false;
 
     const pos = tileToPixel(col, row, TILE_SIZE);
     this.sprite = scene.add.sprite(pos.x, pos.y, this.textureKey).setDepth(5);
 
-    scene.tweens.add({
+    this._startPulseTween();
+    this._armFuse(BOMB_TIMER);
+  }
+
+  _startPulseTween() {
+    this.scene.tweens.killTweensOf(this.sprite);
+    this.scene.tweens.add({
       targets: this.sprite, scaleX: 1.15, scaleY: 1.15,
       duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
     });
+  }
 
-    this._timerEvent = scene.time.addEvent({
-      delay: BOMB_TIMER, callback: this.detonate, callbackScope: this,
-    });
-
-    this._warnEvent = scene.time.addEvent({
-      delay: BOMB_TIMER - 700,
-      callback: () => {
-        if (!this.exploded && this.sprite.active) {
-          scene.tweens.add({
-            targets: this.sprite, tint: 0xff4400, duration: 100, yoyo: true, repeat: 5,
-          });
-        }
+  _triggerFuseWarning() {
+    if (this.exploded || !this.sprite?.active) return;
+    this.scene.tweens.add({
+      targets: this.sprite,
+      tint: 0xff4400,
+      duration: 100,
+      yoyo: true,
+      repeat: 5,
+      onComplete: () => {
+        if (this.sprite?.active) this.sprite.clearTint();
       },
     });
+  }
+
+  _armFuse(delayMs = BOMB_TIMER) {
+    if (this._timerEvent) this._timerEvent.remove(false);
+    if (this._warnEvent) this._warnEvent.remove(false);
+
+    const safeDelay = Math.max(150, Number(delayMs) || BOMB_TIMER);
+    this._timerEvent = this.scene.time.addEvent({
+      delay: safeDelay,
+      callback: this.detonate,
+      callbackScope: this,
+    });
+
+    this._warnEvent = this.scene.time.addEvent({
+      delay: Math.max(60, safeDelay - 700),
+      callback: this._triggerFuseWarning,
+      callbackScope: this,
+    });
+  }
+
+  beginUfoSwapLock() {
+    if (this.exploded) return false;
+    this._swapLocked = true;
+    this._sliding = false;
+
+    this.scene.tweens.killTweensOf(this.sprite);
+    const pos = tileToPixel(this.col, this.row, TILE_SIZE);
+    this.sprite.setPosition(pos.x, pos.y);
+
+    if (this._timerEvent) this._timerEvent.paused = true;
+    if (this._warnEvent) this._warnEvent.paused = true;
+    return true;
+  }
+
+  endUfoSwapLock(newCol, newRow) {
+    if (this.exploded) return false;
+
+    const oldKey = `${this.col},${this.row}`;
+    if (this.manager.bombs.get(oldKey) === this) {
+      this.manager.bombs.delete(oldKey);
+    }
+
+    this.col = newCol;
+    this.row = newRow;
+    this.manager.bombs.set(`${this.col},${this.row}`, this);
+
+    this._swapLocked = false;
+    this._sliding = false;
+
+    const pos = tileToPixel(this.col, this.row, TILE_SIZE);
+    this.sprite.setPosition(pos.x, pos.y);
+    this.sprite.clearTint();
+
+    this._startPulseTween();
+    this._armFuse(BOMB_TIMER);
+    return true;
   }
 
   getRemaining() { return this._timerEvent ? this._timerEvent.getRemaining() : 0; }
@@ -82,6 +144,7 @@ class Bomb {
   }
 
   kick(dx, dy) {
+    if (this._swapLocked) return;
     if (this._kickBlocked) return;
     if (this._sliding) return;
     audioManager.playKick();
@@ -90,6 +153,7 @@ class Bomb {
 
   /** Slides the bomb one tile in direction (dx,dy), then schedules the next slide. */
   _slide(dx, dy) {
+    if (this._swapLocked) { this._sliding = false; return; }
     if (this.exploded) { this._sliding = false; return; }
     const newCol = this.col + dx;
     const newRow = this.row + dy;
@@ -113,6 +177,7 @@ class Bomb {
   destroy() {
     if (this._timerEvent) this._timerEvent.remove(false);
     if (this._warnEvent)  this._warnEvent.remove(false);
+    this.scene.tweens.killTweensOf(this.sprite);
     if (this.sprite && this.sprite.active) this.sprite.destroy();
   }
 }

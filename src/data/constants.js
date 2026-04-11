@@ -41,7 +41,7 @@ export const PLAYER_COLORS = [
 
 export const DEFAULT_CHARACTER_ID = 'foxy';
 
-export const CHARACTER_IDS = ['foxy', 'bomby', 'bony', 'dracarys', 'will-e'];
+export const CHARACTER_IDS = ['foxy', 'bomby', 'bony', 'dracarys', 'frostik', 'ufo', 'will-e'];
 
 export const CHARACTER_DEFS = {
   foxy: {
@@ -153,6 +153,71 @@ export const CHARACTER_DEFS = {
     hasActiveAbility: true,
     abilityChargeMs: 1000,
     abilityCooldownMs: 20000,
+    bombTexture: 'bomb',
+  },
+  frostik: {
+    id: 'frostik',
+    label: 'Frostik',
+    folder: 'frostik',
+    idle: {
+      down: 'frostik_walk_down_1',
+      right: 'frostik_walk_right_1',
+      up: 'frostik_walk_up_1',
+    },
+    walkBase: {
+      down: 'frostik_walk_down_',
+      right: 'frostik_walk_right_',
+      up: 'frostik_walk_up_',
+    },
+    walkFrames: {
+      down: 2,
+      up: 2,
+      right: 3,
+    },
+    spriteHeight: 125,
+    originY: 0.82,
+    abilityName: 'Disparo de escarcha',
+    abilityDesc: 'Frostik dispara una bola de hielo en linea recta; si impacta a un rival, lo congela 3s a velocidad fija del 50% base.',
+    hasActiveAbility: true,
+    abilityCooldownMs: 5000,
+    abilityFreezeMs: 3000,
+    abilityProjectileSpeed: 360,
+    abilityProjectileRangeTiles: 7,
+    abilityHitRadiusPx: 18,
+    bombTexture: 'bomb',
+  },
+  ufo: {
+    id: 'ufo',
+    label: 'UFO',
+    folder: 'ufo',
+    idle: {
+      down: 'ufo_walk_down_1',
+      right: 'ufo_walk_right_1',
+      up: 'ufo_walk_up_1',
+    },
+    walkBase: {
+      down: 'ufo_walk_down_',
+      right: 'ufo_walk_right_',
+      up: 'ufo_walk_up_',
+    },
+    walkFrames: {
+      down: 2,
+      up: 2,
+      right: 2,
+    },
+    spriteHeight: 96,
+    originY: 0.78,
+    abilityName: 'Intercambio cuantico',
+    abilityDesc: 'UFO intercambia posicion con la bomba valida mas lejana. El intercambio dura 3s y reinicia el temporizador de la bomba.',
+    hasActiveAbility: true,
+    abilityCooldownMs: 15000,
+    abilitySwapStartMs: 500,
+    abilitySwapTravelMs: 2000,
+    abilitySwapEndMs: 500,
+    abilitySprites: {
+      start: 'ufo_ability_start',
+      end: 'ufo_ability_end',
+    },
     bombTexture: 'bomb',
   },
   'will-e': {

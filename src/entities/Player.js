@@ -95,6 +95,16 @@ export class Player {
     this._dracarysChargeEvent = null;
     this._dracarysSpinTween = null;
 
+    this._ufoSwapping = false;
+    this._ufoSwapInvulnerable = false;
+
+    this._frostikFrozen = false;
+    this._frostikFreezeTimer = 0;
+    this._freezeAura = null;
+    this._freezeAuraTween = null;
+    this._freezeSparkEvent = null;
+    this._hasFreezeTint = false;
+
     this._bonyRevivePending = false;
     this._bonyReviveEvent = null;
     this._invincibilityTween = null;
@@ -195,7 +205,14 @@ export class Player {
   }
 
   _restoreBaseTint() {
-    if (this._hasCurseTint) return;
+    if (this._hasFreezeTint) {
+      this.sprite.setTint(0x7dd8ff);
+      return;
+    }
+    if (this._hasCurseTint) {
+      this.sprite.setTint(0xff0000);
+      return;
+    }
     if (this._duplicateTint !== null) {
       this.sprite.setTint(this._duplicateTint);
       return;
@@ -216,6 +233,7 @@ export class Player {
     this.sprite.setVisible(visible);
     this.label.setVisible(visible);
     this.abilityLabel.setVisible(visible);
+    if (this._freezeAura?.active) this._freezeAura.setVisible(visible);
     if (!next) {
       this._walkFrame = 0;
       this._setIdleTexture();
@@ -225,7 +243,7 @@ export class Player {
   }
 
   _isMovementLocked() {
-    return this._bombyTransformed || this._dracarysCharging;
+    return this._bombyTransformed || this._dracarysCharging || this._ufoSwapping;
   }
 
   _setDracarysChargeVisual(active, durationMs = null) {
@@ -275,6 +293,7 @@ export class Player {
   }
 
   isImmuneToExplosion(owner) {
+    if (this._ufoSwapInvulnerable) return true;
     if (this._bombyTransformed) return true;
     return owner === this && this._bombyImmuneBomb;
   }
@@ -323,10 +342,26 @@ export class Player {
       return;
     }
 
-    if (this.characterId !== 'bomby' && this.characterId !== 'will-e') return;
+    if (this.characterId !== 'bomby' && this.characterId !== 'will-e' && this.characterId !== 'ufo' && this.characterId !== 'frostik') return;
 
     if (this.characterId === 'will-e') {
       const launched = !!this.scene.tryLaunchWillEMissile?.(this);
+      if (!launched) return;
+      this._abilityCooldownRemaining = this._abilityCooldownMs;
+      this.refreshAbilityStatus();
+      return;
+    }
+
+    if (this.characterId === 'ufo') {
+      const launched = !!this.scene.tryActivateUfoSwap?.(this);
+      if (!launched) return;
+      this._abilityCooldownRemaining = this._abilityCooldownMs;
+      this.refreshAbilityStatus();
+      return;
+    }
+
+    if (this.characterId === 'frostik') {
+      const launched = !!this.scene.tryLaunchFrostikShot?.(this);
       if (!launched) return;
       this._abilityCooldownRemaining = this._abilityCooldownMs;
       this.refreshAbilityStatus();
@@ -372,6 +407,7 @@ export class Player {
   setOverheadPosition(x, y) {
     this.label.setPosition(x, y - TILE_SIZE / 2 - 4);
     this.abilityLabel.setPosition(x, y - TILE_SIZE / 2 - 17);
+    if (this._freezeAura?.active) this._freezeAura.setPosition(x, y);
   }
 
   refreshAbilityStatus() {
@@ -443,6 +479,7 @@ export class Player {
   update(delta, input) {
     if (!this.alive || !this.sprite.active) return;
     this._tickAbilityCooldown(delta);
+    this._tickFrostikFreeze(delta);
 
     // Skull curse tick (random movement or inverted controls)
     if (this.stunned || this._reverseControls) {
@@ -489,6 +526,7 @@ export class Player {
   updateActionsOnly(delta, input) {
     if (!this.alive || !this.sprite.active) return;
     this._tickAbilityCooldown(delta);
+    this._tickFrostikFreeze(delta);
 
     // Skull curse tick (random movement or inverted controls)
     if (this.stunned || this._reverseControls) {
@@ -529,7 +567,7 @@ export class Player {
   _handleMovement(delta, input) {
     if (this._isMovementLocked()) return;
 
-    const speed = this.stunned ? this.stats.speed * 2 : this.stats.speed;
+    const speed = this._getCurrentMoveSpeed();
     const R = Math.round(TILE_SIZE * 3 / 8); // 18 px
     const step = speed * (delta / 1000);
     let vx = 0;
@@ -805,6 +843,11 @@ export class Player {
     return true;
   }
 
+  _getCurrentMoveSpeed() {
+    if (this._frostikFrozen) return Math.max(1, Math.round(DEFAULT_PLAYER_STATS.speed * 0.5));
+    return this.stunned ? this.stats.speed * 2 : this.stats.speed;
+  }
+
   _tryPlaceBomb() {
     if (this.activeBombs >= this.stats.maxBombs) return;
     const { col, row } = this.tilePos;
@@ -916,7 +959,7 @@ export class Player {
     const next = !!active;
     if (next) {
       this._hasCurseTint = true;
-      this.sprite.setTint(0xff0000);
+      this._restoreBaseTint();
       if (!this._curseBlinkTween) {
         this._curseBlinkTween = this.scene.tweens.add({
           targets: this.sprite,
@@ -952,6 +995,99 @@ export class Player {
       this._curseClearCallback = null;
       cb();
     }
+  }
+
+  _setFrozenVisualActive(active) {
+    const next = !!active;
+
+    if (!next) {
+      this._hasFreezeTint = false;
+      if (this._freezeAuraTween) {
+        this._freezeAuraTween.stop();
+        this._freezeAuraTween.remove();
+        this._freezeAuraTween = null;
+      }
+      if (this._freezeSparkEvent) {
+        this._freezeSparkEvent.remove(false);
+        this._freezeSparkEvent = null;
+      }
+      if (this._freezeAura?.active) {
+        this._freezeAura.destroy();
+      }
+      this._freezeAura = null;
+      this._restoreBaseTint();
+      return;
+    }
+
+    this._hasFreezeTint = true;
+    this._restoreBaseTint();
+
+    if (!this._freezeAura?.active) {
+      this._freezeAura = this.scene.add.circle(this.x, this.y, TILE_SIZE * 0.45, 0x8fdfff, 0.2).setDepth(18);
+      this._freezeAura.setStrokeStyle(2, 0xdff7ff, 0.95);
+    }
+    this._freezeAura.setVisible(this.sprite.visible);
+
+    if (!this._freezeAuraTween) {
+      this._freezeAuraTween = this.scene.tweens.add({
+        targets: this._freezeAura,
+        scale: { from: 0.9, to: 1.18 },
+        alpha: { from: 0.3, to: 0.08 },
+        duration: 260,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    }
+
+    if (!this._freezeSparkEvent) {
+      this._freezeSparkEvent = this.scene.time.addEvent({
+        delay: 220,
+        loop: true,
+        callback: () => {
+          if (!this._frostikFrozen || !this.alive || !this.sprite?.active) return;
+          const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+          const dist = Phaser.Math.Between(8, 18);
+          const sx = this.x + Math.cos(angle) * dist;
+          const sy = this.y + Math.sin(angle) * dist;
+          const spark = this.scene.add.circle(sx, sy, 2, 0xe8fbff, 0.9).setDepth(19);
+          this.scene.tweens.add({
+            targets: spark,
+            x: sx + Math.cos(angle) * 7,
+            y: sy + Math.sin(angle) * 7,
+            alpha: 0,
+            scale: 0.2,
+            duration: 220,
+            ease: 'Quad.Out',
+            onComplete: () => spark.destroy(),
+          });
+        },
+      });
+    }
+  }
+
+  _tickFrostikFreeze(delta) {
+    if (!this._frostikFrozen) return;
+    this._frostikFreezeTimer = Math.max(0, this._frostikFreezeTimer - delta);
+    if (this._frostikFreezeTimer <= 0) {
+      this._clearFrostikFreeze();
+    }
+  }
+
+  _clearFrostikFreeze() {
+    this._frostikFrozen = false;
+    this._frostikFreezeTimer = 0;
+    this._setFrozenVisualActive(false);
+  }
+
+  applyFrostikFreeze(durationMs) {
+    const ms = Math.max(0, Number(durationMs) || 0);
+    if (ms <= 0 || !this.alive || !this.sprite?.active) return;
+    this._frostikFrozen = true;
+    this._frostikFreezeTimer = Math.max(this._frostikFreezeTimer, ms);
+    this._isRushing = false;
+    this._rushPending = false;
+    this._setFrozenVisualActive(true);
   }
 
   _stopInvincibilityVisual() {
@@ -1073,14 +1209,17 @@ export class Player {
   die() {
     if (!this.alive) return;
     if (this._bombyTransformed) return;
+    if (this._ufoSwapInvulnerable) return;
     if (this.respawnInvincible) return; // grace period after respawn
     // Trigger bounty item respawn callback if curse was active
     if (this.stunned || this._reverseControls || this._isRushing || this._rushPending || this._rushActive) {
       this._clearCurse();
     }
+    this._clearFrostikFreeze();
     audioManager.playPlayerDeath();
     this.alive = false;
     this._cancelDracarysCharge();
+    this.setUfoSwapState(false);
     this._setBombyTransformedVisual(false);
     this._setDeadTexture();
     this.sprite.setAlpha(0.6);
@@ -1131,6 +1270,8 @@ export class Player {
     this.setOverheadPosition(pos.x, pos.y);
     this._walkFrame = 0;
     this._cancelDracarysCharge();
+    this.setUfoSwapState(false);
+    this._clearFrostikFreeze();
     this._setBombyTransformedVisual(false);
     this._setIdleTexture();
     this.sprite.setAlpha(1);
@@ -1162,6 +1303,38 @@ export class Player {
       this._dracarysChargeEvent = null;
     }
     this._setDracarysChargeVisual(next);
+  }
+
+  setUfoSwapState(active) {
+    if (this.characterId !== 'ufo') return;
+    const next = !!active;
+    this._ufoSwapping = next;
+    this._ufoSwapInvulnerable = next;
+
+    if (!this.sprite?.active) return;
+    if (next) {
+      this.sprite.setAlpha(Math.max(this.sprite.alpha, 0.92));
+      this.sprite.setTint(0x8fe8ff);
+    } else {
+      this.sprite.setAlpha(this.alive ? 1 : 0.6);
+      this._restoreBaseTint();
+    }
+    this.refreshAbilityStatus();
+  }
+
+  setFrostikFreezeState(active, remainingMs = 0) {
+    const next = !!active;
+    if (!next) {
+      this._clearFrostikFreeze();
+      return;
+    }
+
+    const ms = Math.max(0, Number(remainingMs) || 0);
+    this._frostikFrozen = true;
+    this._frostikFreezeTimer = ms;
+    this._isRushing = false;
+    this._rushPending = false;
+    this._setFrozenVisualActive(true);
   }
 
   // -- Network interpolation (remote clients only) --------------------------
@@ -1212,6 +1385,7 @@ export class Player {
       this._bonyReviveEvent.remove(false);
       this._bonyReviveEvent = null;
     }
+    this._clearFrostikFreeze();
     this.setCurseVisualActive(false);
     this.sprite.destroy();
     this.label.destroy();
