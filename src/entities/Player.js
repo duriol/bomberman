@@ -94,9 +94,6 @@ export class Player {
     this._dracarysCharging = false;
     this._dracarysChargeEvent = null;
     this._dracarysSpinTween = null;
-    this._dracarysViewCycleEvent = null;
-    this._dracarysBaseScaleX = null;
-    this._dracarysBaseScaleY = null;
 
     this._bonyRevivePending = false;
     this._bonyReviveEvent = null;
@@ -231,12 +228,6 @@ export class Player {
     return this._bombyTransformed || this._dracarysCharging;
   }
 
-  _setDracarysChargeTexture(facing) {
-    const key = getCharacterIdleKey(this.characterId, facing);
-    this.sprite.setFlipX(facing === 'left');
-    this.sprite.setTexture(key);
-  }
-
   _setDracarysChargeVisual(active, durationMs = null) {
     const next = !!active;
     if (this._dracarysCharging === next && (!next || durationMs === null)) return;
@@ -248,58 +239,28 @@ export class Player {
       this._dracarysSpinTween = null;
     }
 
-    if (this._dracarysViewCycleEvent) {
-      this._dracarysViewCycleEvent.remove(false);
-      this._dracarysViewCycleEvent = null;
-    }
-
     if (next) {
-      const spinMs = Math.max(200, Number(durationMs || this.characterDef.abilityChargeMs || 1500));
+      const spinMs = Math.max(200, Number(durationMs || this.characterDef.abilityChargeMs || 1000));
       this._walkFrame = 0;
       this._setIdleTexture();
       this.sprite.setVelocity(0, 0);
       this.sprite.setAngle(0);
-
-      const fallbackScale = getCharacterScale(this.scene, this.characterId, this._facing || 'down');
-      const baseScaleX = Math.abs(this.sprite.scaleX) || fallbackScale;
-      const baseScaleY = Math.abs(this.sprite.scaleY) || fallbackScale;
-      this._dracarysBaseScaleX = baseScaleX;
-      this._dracarysBaseScaleY = baseScaleY;
-      this.sprite.setScale(baseScaleX, baseScaleY);
-
-      const viewOrder = ['down', 'right', 'up', 'left'];
-      const startIndex = Math.max(0, viewOrder.indexOf(this._facing));
-      let viewIndex = startIndex;
-      this._setDracarysChargeTexture(viewOrder[viewIndex]);
-
-      const viewStepMs = Math.max(90, Math.floor(spinMs / 6));
-      this._dracarysViewCycleEvent = this.scene.time.addEvent({
-        delay: viewStepMs,
-        loop: true,
-        callback: () => {
-          if (!this._dracarysCharging || !this.sprite?.active) return;
-          viewIndex = (viewIndex + 1) % viewOrder.length;
-          this._setDracarysChargeTexture(viewOrder[viewIndex]);
-        },
-      });
+      this.sprite.setAlpha(1);
+      this.sprite.setTint(0xff7a3d);
 
       this._dracarysSpinTween = this.scene.tweens.add({
         targets: this.sprite,
-        scaleX: baseScaleX * 0.78,
-        duration: Math.max(140, Math.floor(spinMs / 4)),
+        alpha: 0.45,
+        duration: Math.max(90, Math.floor(spinMs / 8)),
         ease: 'Sine.easeInOut',
         yoyo: true,
         repeat: -1,
       });
     } else if (this.sprite?.active) {
       this.sprite.setAngle(0);
-      const fallbackScale = getCharacterScale(this.scene, this.characterId, this._facing || 'down');
-      const baseScaleX = Math.abs(this._dracarysBaseScaleX || this.sprite.scaleX) || fallbackScale;
-      const baseScaleY = Math.abs(this._dracarysBaseScaleY || this.sprite.scaleY) || fallbackScale;
-      this.sprite.setScale(baseScaleX, baseScaleY);
+      this.sprite.setAlpha(this.alive ? 1 : 0.6);
+      this._restoreBaseTint();
       this._setIdleTexture();
-      this._dracarysBaseScaleX = null;
-      this._dracarysBaseScaleY = null;
     }
 
     this.refreshAbilityStatus();
@@ -344,7 +305,7 @@ export class Player {
     if (this.characterId === 'dracarys') {
       if (this._dracarysCharging) return;
 
-      const chargeMs = Math.max(1, Number(this.characterDef.abilityChargeMs || 1500));
+      const chargeMs = Math.max(1, Number(this.characterDef.abilityChargeMs || 1000));
       this._setDracarysChargeVisual(true, chargeMs);
       this._abilityCooldownRemaining = this._abilityCooldownMs;
       this.refreshAbilityStatus();
