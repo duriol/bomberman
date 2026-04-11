@@ -347,6 +347,13 @@ export class Player {
 
     this.activeBombs++;
     this._passableBombs.add(`${col},${row}`);
+    const R = Math.round(TILE_SIZE * 3 / 8);
+    for (const player of this.scene.players || []) {
+      if (player === this) continue;
+      if (player._overlapsCircle(player.x, player.y, R, col, row)) {
+        player._passableBombs.add(`${col},${row}`);
+      }
+    }
     this._bombyAbilityBombKey = `${col},${row}`;
     this._bombyImmuneBomb = true;
     this._setBombyTransformedVisual(true);
@@ -779,15 +786,19 @@ export class Player {
         }
       }
     }
-    // Check for bombs, unless Foxy with ability active
-    if (!(this.characterId === 'foxy' && this._foxyAbilityActive)) {
-      for (let row = startRow; row <= endRow; row++) {
-        for (let col = startCol; col <= endCol; col++) {
-          if (this.bombManager.hasBombAt(col, row) && !this._passableBombs.has(`${col},${row}`)) {
-            if (this._overlapsCircle(px, py, r, col, row)) {
-              return false;
-            }
-          }
+    // Check bomb collision with special handling for strict Bomby ability bombs.
+    for (let row = startRow; row <= endRow; row++) {
+      for (let col = startCol; col <= endCol; col++) {
+        const key = `${col},${row}`;
+        if (!this.bombManager.hasBombAt(col, row)) continue;
+        if (this._passableBombs.has(key)) continue;
+
+        const foxyGhostMode = this.characterId === 'foxy' && this._foxyAbilityActive;
+        const strictBombyBomb = this.bombManager.isBombyAbilityBomb(col, row);
+        if (foxyGhostMode && !strictBombyBomb) continue;
+
+        if (this._overlapsCircle(px, py, r, col, row)) {
+          return false;
         }
       }
     }
@@ -835,6 +846,13 @@ export class Player {
           // If the new bomb overlaps the current hitbox, allow exiting its tile.
           if (this._overlapsCircle(this.sprite.x, this.sprite.y, R, c, r)) {
             this._passableBombs.add(`${c},${r}`);
+          }
+          // Also allow any overlapped player to leave the tile to avoid getting stuck.
+          for (const player of this.scene.players || []) {
+            if (player === this) continue;
+            if (player._overlapsCircle(player.x, player.y, R, c, r)) {
+              player._passableBombs.add(`${c},${r}`);
+            }
           }
           audioManager.playPlaceBomb();
           placed++;

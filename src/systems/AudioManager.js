@@ -7,6 +7,7 @@ export class AudioManager {
     this._ctx = null;
     this._masterGain = null;
     this._enabled = true;
+    this._bgmMode = null;
   }
 
   /** Lazily init AudioContext on first user interaction */
@@ -120,17 +121,17 @@ export class AudioManager {
 
     const osc = this.ctx.createOscillator();
     const oscGain = this.ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(180, now);
-    osc.frequency.exponentialRampToValueAtTime(70, now + 0.09);
-    oscGain.gain.setValueAtTime(0.24, now);
-    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(240, now);
+    osc.frequency.exponentialRampToValueAtTime(90, now + 0.1);
+    oscGain.gain.setValueAtTime(0.36, now);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
     osc.connect(oscGain);
     oscGain.connect(this.out);
     osc.start(now);
-    osc.stop(now + 0.13);
+    osc.stop(now + 0.15);
 
-    const bufLen = Math.max(1, Math.floor(this.ctx.sampleRate * 0.06));
+    const bufLen = Math.max(1, Math.floor(this.ctx.sampleRate * 0.08));
     const buffer = this.ctx.createBuffer(1, bufLen, this.ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufLen; i++) {
@@ -140,16 +141,16 @@ export class AudioManager {
     noise.buffer = buffer;
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(220, now);
-    filter.Q.value = 0.7;
+    filter.frequency.setValueAtTime(380, now);
+    filter.Q.value = 0.65;
     const noiseGain = this.ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.12, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    noiseGain.gain.setValueAtTime(0.2, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
     noise.connect(filter);
     filter.connect(noiseGain);
     noiseGain.connect(this.out);
     noise.start(now);
-    noise.stop(now + 0.09);
+    noise.stop(now + 0.11);
   }
 
   /** Item pickup — bright ding */
@@ -281,6 +282,7 @@ export class AudioManager {
   startBGM() {
     if (!this._enabled || this._bgmRunning) return;
     this._bgmRunning = true;
+    this._bgmMode = 'normal';
 
     const scale = [262, 294, 330, 349, 392, 440, 494, 524];
     const pattern = [0, 2, 4, 5, 4, 2, 0, 6];
@@ -311,8 +313,63 @@ export class AudioManager {
     playBeat();
   }
 
+  /** Late-round danger BGM — faster and more tense than default loop */
+  startDangerBGM() {
+    if (!this._enabled) return;
+    if (this._bgmRunning && this._bgmMode === 'danger') return;
+
+    this.stopBGM();
+    this._bgmRunning = true;
+    this._bgmMode = 'danger';
+
+    const scale = [147, 165, 175, 196, 208, 220, 233, 262];
+    const pattern = [0, 2, 1, 4, 2, 5, 3, 6, 4, 7, 5, 2];
+    let beat = 0;
+
+    const playBeat = () => {
+      if (!this._bgmRunning || this._bgmMode !== 'danger') return;
+
+      const freq = scale[pattern[beat % pattern.length]];
+      beat++;
+
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 1500;
+      osc.type = 'sawtooth';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.14, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.out);
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.11);
+
+      if (beat % 2 === 0) {
+        const bass = this.ctx.createOscillator();
+        const bassGain = this.ctx.createGain();
+        bass.type = 'triangle';
+        bass.frequency.setValueAtTime(70, this.ctx.currentTime);
+        bass.frequency.exponentialRampToValueAtTime(52, this.ctx.currentTime + 0.1);
+        bassGain.gain.setValueAtTime(0.09, this.ctx.currentTime);
+        bassGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.12);
+        bass.connect(bassGain);
+        bassGain.connect(this.out);
+        bass.start();
+        bass.stop(this.ctx.currentTime + 0.13);
+      }
+
+      this._bgmTimeout = setTimeout(playBeat, 130);
+    };
+
+    playBeat();
+  }
+
   stopBGM() {
     this._bgmRunning = false;
+    this._bgmMode = null;
     clearTimeout(this._bgmTimeout);
   }
 }

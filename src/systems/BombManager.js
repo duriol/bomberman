@@ -41,6 +41,7 @@ class Bomb {
     this.pierce   = owner.stats.pierce;
     this.textureKey = options.textureKey || 'bomb';
     this.meta = options.meta || null;
+    this._kickBlocked = !!(this.meta?.byAbility && this.meta?.characterId === 'bomby');
 
     const pos = tileToPixel(col, row, TILE_SIZE);
     this.sprite = scene.add.sprite(pos.x, pos.y, this.textureKey).setDepth(5);
@@ -81,6 +82,7 @@ class Bomb {
   }
 
   kick(dx, dy) {
+    if (this._kickBlocked) return;
     if (this._sliding) return;
     audioManager.playKick();
     this._slide(dx, dy);
@@ -127,11 +129,21 @@ export class BombManager {
     this.explosions   = new Set();
     this._vacatedKeys = new Set(); // positions recently vacated by sliding bombs (used by client reconcile)
     this.remoteBombs  = new Set(); // positions of remote (non-owned) bombs, maintained by client reconcile
+    this.remoteBombTextureByKey = new Map();
   }
 
   hasBombAt(col, row) {
     const key = `${col},${row}`;
     return this.bombs.has(key) || this.remoteBombs.has(key);
+  }
+
+  isBombyAbilityBomb(col, row) {
+    const key = `${col},${row}`;
+    const localBomb = this.bombs.get(key);
+    if (localBomb) {
+      return !!(localBomb.meta?.byAbility && localBomb.meta?.characterId === 'bomby');
+    }
+    return this.remoteBombTextureByKey.get(key) === 'bomb_bomby';
   }
 
   placeBomb(col, row, owner, options = {}) {

@@ -647,42 +647,80 @@ export class GameScene extends Phaser.Scene {
     const warningTile = this.add.rectangle(
       targetX,
       targetY,
-      TILE_SIZE - 6,
-      TILE_SIZE - 6,
+      TILE_SIZE + 10,
+      TILE_SIZE + 10,
       0xff4a2a,
-      0.26,
+      0.34,
     ).setDepth(11);
-    warningTile.setStrokeStyle(2, 0xffcc7a, 0.95);
+    warningTile.setStrokeStyle(3, 0xffd56f, 1);
+
+    const warningOuterRing = this.add.circle(targetX, targetY, TILE_SIZE * 0.56, 0xff3a2a, 0.14).setDepth(10);
+    warningOuterRing.setStrokeStyle(3, 0xffa451, 0.9);
+    const warningInnerRing = this.add.circle(targetX, targetY, TILE_SIZE * 0.34, 0xffe58a, 0.22).setDepth(11);
+    warningInnerRing.setStrokeStyle(2, 0xfff1b8, 0.95);
+
+    const warningAlert = this.add.text(targetX, targetY - TILE_SIZE * 0.82, 'MISIL ENTRANTE', {
+      fontSize: '12px',
+      fontFamily: 'monospace',
+      color: '#ffd07a',
+      stroke: '#351000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(12);
 
     const warningText = this.add.text(targetX, targetY, `${Math.ceil(durationMs / 1000)}s`, {
-      fontSize: '16px',
+      fontSize: '22px',
       fontFamily: 'monospace',
       color: '#ffe680',
       stroke: '#3a1000',
       strokeThickness: 4,
     }).setOrigin(0.5).setDepth(12);
 
-    const missileBody = this.add.circle(startX, startY, 6, 0xfff0a8, 1).setDepth(14);
-    const missileCore = this.add.circle(startX, startY, 3, 0xff5a22, 1).setDepth(15);
+    const missileGlow = this.add.circle(startX, startY, 13, 0xff7f3f, 0.35).setDepth(13);
+    const missileBody = this.add.circle(startX, startY, 8, 0xfff0a8, 1).setDepth(14);
+    const missileCore = this.add.circle(startX, startY, 4, 0xff5a22, 1).setDepth(15);
 
     const warningPulse = this.tweens.add({
       targets: warningTile,
-      alpha: { from: 0.2, to: 0.45 },
-      duration: 190,
+      alpha: { from: 0.24, to: 0.62 },
+      duration: 150,
       yoyo: true,
       repeat: -1,
     });
+    const warningOuterPulse = this.tweens.add({
+      targets: warningOuterRing,
+      scale: { from: 0.95, to: 1.22 },
+      alpha: { from: 0.25, to: 0.02 },
+      duration: 340,
+      repeat: -1,
+      ease: 'Quad.Out',
+    });
+    const warningInnerPulse = this.tweens.add({
+      targets: warningInnerRing,
+      scale: { from: 0.92, to: 1.1 },
+      alpha: { from: 0.32, to: 0.12 },
+      duration: 220,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
     const warningTextPulse = this.tweens.add({
       targets: warningText,
-      scale: { from: 1, to: 1.16 },
-      duration: 220,
+      scale: { from: 1, to: 1.22 },
+      duration: 180,
+      yoyo: true,
+      repeat: -1,
+    });
+    const warningAlertPulse = this.tweens.add({
+      targets: warningAlert,
+      alpha: { from: 0.55, to: 1 },
+      duration: 210,
       yoyo: true,
       repeat: -1,
     });
     const missilePulse = this.tweens.add({
-      targets: missileBody,
-      scale: { from: 0.9, to: 1.1 },
-      duration: 110,
+      targets: [missileBody, missileGlow],
+      scale: { from: 0.92, to: 1.24 },
+      duration: 90,
       yoyo: true,
       repeat: -1,
     });
@@ -701,11 +739,18 @@ export class GameScene extends Phaser.Scene {
       shownSeconds: Math.ceil(durationMs / 1000),
       resolveImpact,
       warningTile,
+      warningOuterRing,
+      warningInnerRing,
+      warningAlert,
       warningText,
+      missileGlow,
       missileBody,
       missileCore,
       warningPulse,
+      warningOuterPulse,
+      warningInnerPulse,
       warningTextPulse,
+      warningAlertPulse,
       missilePulse,
     });
     return true;
@@ -724,12 +769,16 @@ export class GameScene extends Phaser.Scene {
 
       if (missile.missileBody?.active) missile.missileBody.setPosition(x, y);
       if (missile.missileCore?.active) missile.missileCore.setPosition(x, y);
+      if (missile.missileGlow?.active) missile.missileGlow.setPosition(x, y);
 
       const remainingMs = Math.max(0, missile.durationMs - missile.elapsedMs);
       const secondsLeft = Math.ceil(remainingMs / 1000);
       if (secondsLeft > 0 && secondsLeft !== missile.shownSeconds && missile.warningText?.active) {
         missile.shownSeconds = secondsLeft;
         missile.warningText.setText(`${secondsLeft}s`);
+      }
+      if (missile.warningText?.active) {
+        missile.warningText.setStyle({ color: remainingMs <= 1000 ? '#ff5a5a' : '#ffe680' });
       }
 
       if (progress < 1) continue;
@@ -753,7 +802,14 @@ export class GameScene extends Phaser.Scene {
     const missile = this._willEMissiles.get(id);
     if (!missile) return;
 
-    const tweens = [missile.warningPulse, missile.warningTextPulse, missile.missilePulse];
+    const tweens = [
+      missile.warningPulse,
+      missile.warningOuterPulse,
+      missile.warningInnerPulse,
+      missile.warningTextPulse,
+      missile.warningAlertPulse,
+      missile.missilePulse,
+    ];
     for (const tw of tweens) {
       if (!tw) continue;
       tw.stop();
@@ -761,7 +817,11 @@ export class GameScene extends Phaser.Scene {
     }
 
     missile.warningTile?.destroy?.();
+    missile.warningOuterRing?.destroy?.();
+    missile.warningInnerRing?.destroy?.();
+    missile.warningAlert?.destroy?.();
     missile.warningText?.destroy?.();
+    missile.missileGlow?.destroy?.();
     missile.missileBody?.destroy?.();
     missile.missileCore?.destroy?.();
 
@@ -1137,6 +1197,8 @@ export class GameScene extends Phaser.Scene {
       onComplete: () => warn.destroy(),
     });
 
+    audioManager.startDangerBGM();
+
     // Guests only mirror HUD/phase state; host remains authoritative for
     // actual spiral wall placement and damage.
     if (this.isOnlineClient) return;
@@ -1447,6 +1509,7 @@ export class GameScene extends Phaser.Scene {
     // 5. Reconcile bomb sprites (no timer logic — just visual presence)
     if (state.bm) {
       const bombTextureByKey = new Map(state.bm.map(b => [`${b.col},${b.row}`, b.tk || 'bomb']));
+      this.bombManager.remoteBombTextureByKey = bombTextureByKey;
       const newSet = new Set([...bombTextureByKey.keys()]);
 
       // Own bombs whose position is no longer in host state have been moved or exploded.
